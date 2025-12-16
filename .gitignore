@@ -28,7 +28,7 @@ env/
 *.code-workspace
 
 # Data & artifacts
-/data/
+# /data/
 !/data/.gitkeep
 /checkpoints/
 /experiments/
