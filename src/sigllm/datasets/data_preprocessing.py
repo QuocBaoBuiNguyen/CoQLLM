@@ -1,4 +1,6 @@
 import copy
+import os
+import pickle
 import sys
 from typing import Optional
 
@@ -38,8 +40,8 @@ def deal_with_each_u(x, u):
 
 
 def build_ml1m(
-    raw_dir: str = "/data/raw/ml-1m",
-    out_dir: str = "/data/zyang/datasets/ml-1m",
+    raw_dir: str = "/content/SigLLM/data/raw/ml-1m",
+    out_dir: str = "/content/SigLLM/data/processed/ml-1m",
     train_slot: list = None,
     valid_slot: list = None,
     test_slot: list = None,
@@ -223,6 +225,46 @@ def build_ml1m(
     test_ = data[data["flag"].isin([1])].copy()
 
     log_step("Final dataset shapes", f"train={len(train_):,}, valid={len(valid_):,}, test={len(test_):,}")
+
+    # Cold-start annotations
+    train_user = set(train_["uid"].unique())
+    train_item = set(train_["iid"].unique())
+    valid_["not_cold"] = (
+        valid_["uid"].isin(train_user) & valid_["iid"].isin(train_item)
+    ).astype("int")
+    test_["not_cold"] = (
+        test_["uid"].isin(train_user) & test_["iid"].isin(train_item)
+    ).astype("int")
+    train_["not_cold"] = 1
+    log_step(
+        "Cold-start flags",
+        f"valid warm={valid_['not_cold'].sum():,}, test warm={test_['not_cold'].sum():,}",
+    )
+
+    # Persist processed artifacts
+    os.makedirs(out_dir, exist_ok=True)
+    train_path = os.path.join(out_dir, "train_seq.pkl")
+    valid_path = os.path.join(out_dir, "valid_seq.pkl")
+    test_path = os.path.join(out_dir, "test_seq.pkl")
+    train_.to_pickle(train_path)
+    valid_.to_pickle(valid_path)
+    test_.to_pickle(test_path)
+
+    valid_small = valid_.sample(frac=0.5, random_state=2023)
+    valid_small_path = os.path.join(out_dir, "valid_small_seq.pkl")
+    valid_small.to_pickle(valid_small_path)
+
+    users_map_path = os.path.join(out_dir, "users_map.pkl")
+    items_map_path = os.path.join(out_dir, "items_map.pkl")
+    with open(users_map_path, "wb") as f:
+        pickle.dump(users_map, f)
+    with open(items_map_path, "wb") as f:
+        pickle.dump(items_map, f)
+
+    log_step(
+        "Saved artifacts",
+        f"train={train_path}, valid={valid_path}, test={test_path}, valid_small={valid_small_path}",
+    )
 
     return train_, valid_, test_, users_map, items_map
 
