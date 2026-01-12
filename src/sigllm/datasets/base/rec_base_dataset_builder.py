@@ -22,16 +22,17 @@ class RecBaseDatasetBuilder(ABC):
     """Abstract base for dataset builders."""
     train_dataset_cls = None
 
-    def __init__(self, config: Any) -> None:
+    def __init__(self, config: Config) -> None:
         self.config = config
 
     @abstractmethod
-    def build_datasets(self, evaluate_only: bool = False):
+    def build_datasets(self):
         """Construct dataset instances for training/validation/test."""
 
         dataset_cls = self.train_dataset_cls
 
         build_info = self.config.build_info
+        evaluate_only = self.config.run_cfg.evaluate
         storage_path = build_info.storage
 
         if storage_path is None or not storage_path.exists():
@@ -41,30 +42,25 @@ class RecBaseDatasetBuilder(ABC):
 
         if evaluate_only:
             datasets["train"] = dataset_cls(
-                config=Config(
-                    ann_path=storage_path / "train",
-                )
+                config=self.config,
+                filename="train",
             )
             datasets["valid"] = dataset_cls(
-                config=Config(
-                    ann_path=storage_path / "valid_small",
-                )
-        )
+                config=self.config,
+                filename="valid_small",
+            )
             datasets["test"] = dataset_cls(
-                config=Config(
-                    ann_path=storage_path / "test",
-                )
+                config=self.config,
+                filename="test",
             )
         else:
             datasets['test_warm'] = dataset_cls(
-                config=Config(
-                    ann_path=storage_path / "test_warm_cold=warm",
-                )
+                config=self.config,
+                filename="test_warm_cold=warm",
             )
             datasets['test_cold'] = dataset_cls(
-                config=Config(
-                    ann_path=storage_path / "test_warm_cold=cold",
-                )
+                config=self.config,
+                filename="test_warm_cold=cold",
             )
 
         return datasets
