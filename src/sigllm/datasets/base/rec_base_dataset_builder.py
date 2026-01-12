@@ -24,13 +24,21 @@ class RecBaseDatasetBuilder(ABC):
 
     def __init__(self, config: Config) -> None:
         self.config = config
+    
+    def _attach_train_meta(self, train_ds, name: str, dataset_config):
+        train_ds.name = name
+        if 'sample_ratio' in dataset_config:
+            train_ds.sample_ratio = dataset_config.sample_ratio
 
     @abstractmethod
-    def build_datasets(self):
+    def build_datasets(self, name: str):
         """Construct dataset instances for training/validation/test."""
 
         dataset_cls = self.train_dataset_cls
 
+        datasets_config = self.config.datasets_cfg
+        dataset_config = datasets_config[name]
+        
         build_info = self.config.build_info
         evaluate_only = self.config.run_cfg.evaluate
         storage_path = build_info.storage
@@ -40,11 +48,13 @@ class RecBaseDatasetBuilder(ABC):
 
         datasets = dict()
 
-        if evaluate_only:
+        if not evaluate_only:            
             datasets["train"] = dataset_cls(
                 config=self.config,
                 filename="train",
             )
+            self._attach_train_meta(datasets["train"], name, dataset_config)
+
             datasets["valid"] = dataset_cls(
                 config=self.config,
                 filename="valid_small",
