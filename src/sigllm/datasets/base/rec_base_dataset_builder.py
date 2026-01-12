@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 from abc import abstractmethod
 from typing import Any, Dict, Optional
 
+from sigllm.common.config import Config
 from sigllm.common.logging_utils import NotebookLogger
-from sigllm.datasets.configs.rec_dataset_config import RecDatasetConfig
 
 LOGGER = NotebookLogger.rich_logger("sigllm.rec_base_dataset_builder")
 
@@ -41,28 +41,28 @@ class RecBaseDatasetBuilder(ABC):
 
         if evaluate_only:
             datasets["train"] = dataset_cls(
-                config=RecDatasetConfig(
+                config=Config(
                     ann_path=storage_path / "train",
                 )
             )
             datasets["valid"] = dataset_cls(
-                config=RecDatasetConfig(
+                config=Config(
                     ann_path=storage_path / "valid_small",
                 )
         )
             datasets["test"] = dataset_cls(
-                config=RecDatasetConfig(
+                config=Config(
                     ann_path=storage_path / "test",
                 )
             )
         else:
             datasets['test_warm'] = dataset_cls(
-                config=RecDatasetConfig(
+                config=Config(
                     ann_path=storage_path / "test_warm_cold=warm",
                 )
             )
             datasets['test_cold'] = dataset_cls(
-                config=RecDatasetConfig(
+                config=Config(
                     ann_path=storage_path / "test_warm_cold=cold",
                 )
             )

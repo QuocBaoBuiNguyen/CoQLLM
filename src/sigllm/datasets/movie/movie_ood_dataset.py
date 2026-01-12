@@ -6,9 +6,9 @@ from typing import Literal, Optional
 import pandas as pd
 import numpy as np
 
+from sigllm.common.config import Config
 from sigllm.common.logging_utils import NotebookLogger
 from sigllm.datasets.base.rec_base_dataset import RecBaseDataset
-from sigllm.datasets.configs.rec_dataset_config import RecDatasetConfig
 
 LOGGER = NotebookLogger.rich_logger("sigllm.movie_ood_dataset")
 
@@ -22,7 +22,7 @@ class MovieOODDataset(RecBaseDataset):
 
 	def __init__(
 		self,
-		config: RecDatasetConfig,
+		config: Config,
 		subset: Literal["all", "warm", "cold"] = "all"
 	) -> None:
 		super().__init__()

@@ -3,12 +3,12 @@
 from torch.utils.data import Dataset
 import pandas as pd
 
-from sigllm.datasets.configs.rec_dataset_config import RecDatasetConfig
+from sigllm.common.config import Config
 
 class RecBaseDataset(Dataset):
     """Placeholder class for shared dataset behavior."""
 
-    def __init__(self, config: RecDatasetConfig) -> None:
+    def __init__(self, config: Config) -> None:
         ann_path = config.ann_path
 
         if (ann_path is None) or (not ann_path.exists()):
