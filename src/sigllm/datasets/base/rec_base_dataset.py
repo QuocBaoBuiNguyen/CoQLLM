@@ -8,8 +8,8 @@ from sigllm.common.config import Config
 class RecBaseDataset(Dataset):
     """Placeholder class for shared dataset behavior."""
 
-    def __init__(self, config: Config, filename: str = None) -> None:
-        ann_path = config.build_info.storage / filename
+    def __init__(self, dataset_config, filename: str = None) -> None:
+        ann_path = dataset_config.build_info.storage / filename
 
         if (ann_path is None) or (not ann_path.exists()):
             raise ValueError(f"Annotation path {ann_path} does not exist.")

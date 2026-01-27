@@ -22,12 +22,12 @@ class MovieOODDataset(RecBaseDataset):
 
 	def __init__(
 		self,
-		config: Config,
+		dataset_config,
 		filename: str = None,
 		subset: Literal["all", "warm", "cold"] = "all"
 	) -> None:
 		super().__init__()
-		ann_path = config.build_info.storage / filename
+		ann_path = dataset_config.build_info.storage / filename
 		
 		if (ann_path is None) or (not ann_path.exists()):
 			raise ValueError(f"Annotation path {ann_path} does not exist.")
