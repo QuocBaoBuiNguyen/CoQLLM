@@ -5,6 +5,8 @@ class Registry:
 
     mapping = {
         "builder_name_mapping": {},
+        "task_name_mapping": {},
+        "runner_name_mapping": {},
     }
 
     @classmethod
@@ -35,6 +37,63 @@ class Registry:
     @classmethod
     def get_builder_class(cls, name):
         return cls.mapping["builder_name_mapping"].get(name, None)
+
+    @classmethod
+    def register_task(cls, name):
+        r"""Register a task to registry under a given name.
+        
+        Args:
+            name (str): The name to register the task under.
+
+        Returns:
+            A decorator that registers the task class.
+        """
+
+        def wrap(task_cls):
+
+            from sigllm.tasks.base.rec_base_task import RecBaseTask
+
+            assert issubclass(
+                task_cls, RecBaseTask
+            ), "All tasks must inherit RecBaseTask class, found {}".format(
+                task_cls
+            )
+            cls.mapping["task_name_mapping"][name] = task_cls
+            return task_cls
+
+        return wrap
+
+    @classmethod
+    def get_task_class(cls, name):
+        return cls.mapping["task_name_mapping"].get(name, None)
+    
+    @classmethod
+    def register_runner(cls, name):
+        r"""Register a model to registry with key 'name'
+
+        Args:
+            name: Key with which the task will be registered.
+
+        Usage:
+
+            from minigpt4.common.registry import registry
+        """
+
+        def wrap(runner_cls):
+            if name in cls.mapping["runner_name_mapping"]:
+                raise KeyError(
+                    "Name '{}' already registered for {}.".format(
+                        name, cls.mapping["runner_name_mapping"][name]
+                    )
+                )
+            cls.mapping["runner_name_mapping"][name] = runner_cls
+            return runner_cls
+
+        return wrap
+
+    @classmethod
+    def get_runner_class(cls, name):
+        return cls.mapping["runner_name_mapping"].get(name, None)
 
 
 registry = Registry()

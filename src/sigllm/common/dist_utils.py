@@ -1,7 +1,10 @@
+import functools
 import os
 import datetime
 import torch
 import torch.distributed as dist
+import timm.models.hub as timm_hub
+
 
 def is_dist_avail_and_initialized():
     if not dist.is_available():
@@ -10,6 +13,11 @@ def is_dist_avail_and_initialized():
         return False
     return True
 
+def get_world_size():
+    if not is_dist_avail_and_initialized():
+        return 1
+    return dist.get_world_size()
+
 def get_rank():
     if not is_dist_avail_and_initialized():
         return 0
@@ -17,6 +25,15 @@ def get_rank():
 
 def is_main_process():
     return get_rank() == 0
+
+def main_process(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        rank, _ = get_dist_info()
+        if rank == 0:
+            return func(*args, **kwargs)
+
+    return wrapper
 
 def setup_for_distributed(is_master):
     """
@@ -67,3 +84,38 @@ def init_distributed_mode(args):
     )
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
+
+def get_dist_info():
+    if torch.__version__ < "1.0":
+        initialized = dist._initialized
+    else:
+        initialized = dist.is_initialized()
+    if initialized:
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+    else:  # non-distributed training
+        rank = 0
+        world_size = 1
+    return rank, world_size
+
+def download_cached_file(url, check_hash=True, progress=False):
+    """
+    Download a file from a URL and cache it locally. If the file already exists, it is not downloaded again.
+    If distributed, only the main process downloads the file, and the other processes wait for the file to be downloaded.
+    """
+
+    def get_cached_file_path():
+        # a hack to sync the file path across processes
+        parts = torch.hub.urlparse(url)
+        filename = os.path.basename(parts.path)
+        cached_file = os.path.join(timm_hub.get_cache_dir(), filename)
+
+        return cached_file
+
+    if is_main_process():
+        timm_hub.download_cached_file(url, check_hash, progress)
+
+    if is_dist_avail_and_initialized():
+        dist.barrier()
+
+    return get_cached_file_path()
