@@ -6,6 +6,7 @@ class Registry:
     mapping = {
         "builder_name_mapping": {},
         "task_name_mapping": {},
+        "model_name_mapping": {},
         "runner_name_mapping": {},
     }
 
@@ -95,5 +96,57 @@ class Registry:
     def get_runner_class(cls, name):
         return cls.mapping["runner_name_mapping"].get(name, None)
 
+    @classmethod
+    def register_model(cls, name):
+        r"""Register a task to registry with key 'name'
+
+        Args:
+            name: Key with which the task will be registered.
+
+        Usage:
+
+            from minigpt4.common.registry import registry
+        """
+
+        def wrap(model_cls):
+            from sigllm.models import BaseModel
+
+            assert issubclass(
+                model_cls, BaseModel
+            ), "All models must inherit BaseModel class"
+            if name in cls.mapping["model_name_mapping"]:
+                raise KeyError(
+                    "Name '{}' already registered for {}.".format(
+                        name, cls.mapping["model_name_mapping"][name]
+                    )
+                )
+            cls.mapping["model_name_mapping"][name] = model_cls
+            return model_cls
+
+        return wrap
+
+    @classmethod
+    def get_model_class(cls, name):
+        return cls.mapping["model_name_mapping"].get(name, None)
+    
+    @classmethod
+    def register_path(cls, name, path):
+        r"""Register a path to registry with key 'name'
+
+        Args:
+            name: Key with which the path will be registered.
+
+        Usage:
+
+            from minigpt4.common.registry import registry
+        """
+        assert isinstance(path, str), "All path must be str."
+        if name in cls.mapping["paths"]:
+            raise KeyError("Name '{}' already registered.".format(name))
+        cls.mapping["paths"][name] = path
+        
+    @classmethod
+    def get_path(cls, name):
+        return cls.mapping["paths"].get(name, None)
 
 registry = Registry()
