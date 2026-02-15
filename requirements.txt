@@ -3,3 +3,5 @@ torch
 scikit-learn
 webdataset
 timm
+transformers
+peft
