@@ -37,6 +37,8 @@ class QRecLLM(Rec2Base):
         "pretrain_vicuna": "configs/models/minigpt4rec.yaml",
     }    
     
+    PLACEHOLDERS_FOR_EMBED = ["<UserID>", "<ItemIDList>", "<TargetItemID>"]
+
     def __init__(
         self,
         rec_model="MF",
@@ -211,6 +213,127 @@ class QRecLLM(Rec2Base):
 
     def print_prompt(self):
         log_step('Prompt Pos Example \n{} {} or {}'.format(random.choice(self.prompt_list),self.pos_ans[0],self.neg_ans[0]))
+    
+    def rec_to_cpu(self):
+        self.rec_encoder.to("cpu")
+        self.rec_encoder.float()
+    
+    def get_placeholder_order(prompt: str, placeholders=PLACEHOLDERS_FOR_EMBED):
+        positions = []
+        for ph in placeholders:
+            pos = prompt.find(ph)
+            if pos >= 0:
+                positions.append((pos, ph))
+        positions.sort(key=lambda x: x[0])
+        return [ph for _, ph in positions]
+    
+    def build_llm_inputs_from_prompt_v2(self, prompt, samples):
+        placeholder_order = self.get_placeholder_order(prompt) if prompt else None
+        samples_encode, atts_samples = self.encode_rec_features_to_llm_v2(samples, placeholder_order=placeholder_order)
+        sample_embeds, atts_samples = self.wrap_prompt_with_soft_tokens_v2(samples_encode, samples, atts_samples, prompt)
+        return sample_embeds, atts_samples
+
+    def encode_rec_features_to_llm_v2(self, sample, placeholder_order=None):
+        if self.rec_encoder is None:
+            return None, None
+
+        device = sample["UserID"].device
+        if self.low_resource:
+            self.rec_to_cpu()
+            for k in sample:
+                sample[k] = sample[k].to("cpu")
+
+        with self.maybe_autocast():
+            B = sample["UserID"].shape[0]
+            H = self.llama_model.config.hidden_size
+
+            all_user_embeds, all_item_embeds = self.rec_encoder.compute()
+
+            # --- user embedding ---
+            if self.rec_model_type == "sasrec":
+                raise NotImplementedError("sasrec is not implemented in this version")
+                # user_embeds = self.rec_encoder.seq_encoder(sample["sas_seq"]).unsqueeze(-2)
+            elif self.rec_model_type in ("DCN", "DIN"):
+                raise NotImplementedError("DCN and DIN are not implemented in this version")
+                # user_embeds = self.rec_encoder.all_encode(
+                #     sample["UserID"],
+                #     sample["TargetItemID"],
+                #     sample["sas_seq"][:, -10:]
+                # ).unsqueeze(-2)
+            else:
+                user_embeds = self.rec_encoder.user_encoder(sample["UserID"], all_users=all_user_embeds).unsqueeze(-2)
+
+            # --- target item embedding ---
+            target_item_embeds = self.rec_encoder.item_encoder(sample["TargetItemID"], all_items=all_item_embeds).unsqueeze(-2)
+
+            # --- project to space llama ---
+            user_llama = self.llama_proj(user_embeds).reshape(B, -1, self.proj_token_num, H)
+            target_llama = self.llama_proj(target_item_embeds).reshape(B, -1, self.proj_token_num, H)
+
+            user_llama_flat = user_llama.reshape(B, -1, H)
+            target_llama_flat = target_llama.reshape(B, -1, H)
+
+            interacted_llama_flat = None
+            merged_flat = None
+
+            has_interacted = "InteractedItemIDs_pad" in sample
+            need_merge = has_interacted and placeholder_order is not None and len(placeholder_order) == 3
+
+            if need_merge:
+                interacted = self.rec_encoder.item_encoder(sample["InteractedItemIDs_pad"], all_items=all_item_embeds)
+                interacted_llama = self.llama_proj(interacted).reshape(B, -1, self.proj_token_num, H)
+                interacted_llama_flat = interacted_llama.reshape(B, -1, H)
+
+                # map placeholder -> embedding block
+                ph2emb = {
+                    "<UserID>": user_llama_flat,                 # (B, U, H)
+                    "<ItemIDList>": interacted_llama_flat,       # (B, I, H)
+                    "<TargetItemID>": target_llama_flat          # (B, T, H)
+                }
+
+                # concat theo placeholder_order
+                merged = torch.cat([ph2emb[ph] for ph in placeholder_order], dim=1)  # (B, U+I+T, H)
+
+                # mask padding cho ItemIDList
+                item_ids = sample["InteractedItemIDs_pad"]
+                item_mask = torch.where(item_ids == self.rec_encoder.padding_index, 0, 1)  # (B, I)
+                ph2mask = {
+                    "<UserID>": torch.ones((B, 1), device=item_mask.device, dtype=item_mask.dtype),
+                    "<ItemIDList>": item_mask,
+                    "<TargetItemID>": torch.ones((B, 1), device=item_mask.device, dtype=item_mask.dtype),
+                }
+                full_mask = torch.cat([ph2mask[ph] for ph in placeholder_order], dim=1).to(device)  # (B, U+I+T)
+
+                idx_nopad = torch.nonzero(full_mask)  # (N, 2)
+                merged_flat = merged[idx_nopad[:, 0], idx_nopad[:, 1]].reshape(-1, H)  # (N, H)
+
+            sample_embeds_llama = {
+                "User_emb": user_llama_flat,
+                "TargetItem_emb": target_llama_flat,
+                "InteractedItems_embs": interacted_llama_flat,
+                "merged_embs": merged_flat,
+                # 'loss_c': loss_c
+            }
+        sample_atts_llama = None
+        # {
+        #     'user': atts_user,
+        #     'TargetItem': atts_targetItem,
+        #     'InteractedItems': atts_interactedItem
+        # }
+        return sample_embeds_llama, sample_atts_llama
+
+    def wrap_prompt_with_soft_tokens_v2(self, prompt, rec_features):
+        return
+
+    def forward(self, samples):
+        if self.run_mode_ == 'v2':
+            return self.forward_v2(samples)
+        else:
+            raise NotImplementedError("Only forward_v2 is implemented in this version")
+        
+    def forward_v2(self, samples):
+        if self.prompt_list:
+            prompt = random.choices(self.prompt_list, weights=[5,5,5,1], k=1)[0] #[1,5,3,1]  #[2,5,3,1]
 
     @classmethod
     def from_config(cls, cfg):

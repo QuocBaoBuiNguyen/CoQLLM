@@ -9,11 +9,14 @@ class MatrixFactorization(nn.Module):
         self.user_embedding = nn.Embedding(config.user_num, config.embedding_size, padding_idx=self.padding_index)
         self.item_embedding = nn.Embedding(config.item_num, config.embedding_size, padding_idx=self.padding_index)
     
-    def get_user_embedding(self,user_ids):
+    def user_encoder(self,user_ids):
         return self.user_embedding(user_ids)
 
-    def get_item_embedding(self,item_ids):
+    def item_encoder(self,item_ids):
         return self.item_embedding(item_ids)
+
+    def compute(self):
+        return None, None
 
     def forward(self, user_ids, item_ids):
         user_embeddings = self.user_embedding(user_ids)

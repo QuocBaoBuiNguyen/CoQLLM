@@ -18,10 +18,11 @@ import webdataset as wds
 from sigllm.common.dist_utils import *
 from sigllm.common.registry import registry
 from sigllm.common.utils import is_url
-from sigllm.common.data_utils import reorg_datasets_by_split, ChainDataset
-from sigllm.common.dataloader_utils import *
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
+from sigllm.runners.utils.optimizer_builder import build_optimizer
+from sigllm.runners.utils.scheduler_builder import build_scheduler
+from sigllm.runners.utils.scaler_builder import build_scaler
+from sigllm.runners.utils.model_wrapper import wrap_model
+from sigllm.runners.utils.dataloader_builder import build_dataloaders
 
 @registry.register_runner("runner_base")
 class RunnerBase:
@@ -35,19 +36,15 @@ class RunnerBase:
     def __init__(self, cfg, task, model, datasets, job_id):
         self.config = cfg
         self.job_id = job_id
-
         self.task = task
         self.datasets = datasets
-
         self._model = model
-
         self._wrapped_model = None
         self._device = None
         self._optimizer = None
         self._scaler = None
         self._dataloaders = None
         self._lr_sched = None
-
         self.start_epoch = 0
 
         # self.setup_seeds()
@@ -69,62 +66,22 @@ class RunnerBase:
         """
         A property to get the DDP-wrapped model on the device.
         """
-        # move model to device
-        if self._model.device != self.device:
-            self._model = self._model.to(self.device)
-
-            # distributed training wrapper
-            if self.use_distributed:
-                if self._wrapped_model is None:
-                    self._wrapped_model = DDP(
-                        self._model, device_ids=[self.config.run_cfg.gpu], find_unused_parameters=True
-                    )
-            else:
-                self._wrapped_model = self._model
-
+        if self._wrapped_model is None:
+            self._wrapped_model = wrap_model(
+                self._model, self.config, self.device, self.use_distributed
+            )
         return self._wrapped_model
 
     @property
     def optimizer(self):
-        # TODO make optimizer class and configurations
         if self._optimizer is None:
-            num_parameters = 0
-            p_wd, p_non_wd = [], []
-            for n, p in self.model.named_parameters():
-                if not p.requires_grad:
-                    continue  # frozen weights
-                print(n)
-                if p.ndim < 2 or "bias" in n or "ln" in n or "bn" in n:
-                    p_non_wd.append(p)
-                else:
-                    p_wd.append(p)
-                num_parameters += p.data.nelement()
-            logging.info("number of trainable parameters: %d" % num_parameters)
-            self._num_trainable_para = num_parameters > 0
-            optim_params = [
-                {
-                    "params": p_wd,
-                    "weight_decay": float(self.config.run_cfg.weight_decay),
-                },
-                {"params": p_non_wd, "weight_decay": 0},
-            ]
-            beta2 = self.config.run_cfg.get("beta2", 0.999)
-            self._optimizer = torch.optim.AdamW(
-                optim_params,
-                lr=float(self.config.run_cfg.init_lr),
-                weight_decay=float(self.config.run_cfg.weight_decay),
-                betas=(0.9, beta2),
-            )
-
+            self._optimizer = build_optimizer(self.model, self.config)
         return self._optimizer
 
     @property
     def scaler(self):
-        amp = self.config.run_cfg.get("amp", False)
-
-        if amp:
-            if self._scaler is None:
-                self._scaler = torch.cuda.amp.GradScaler()
+        if self._scaler is None:
+            self._scaler = build_scaler(self.config)
 
         return self._scaler
 
@@ -134,33 +91,13 @@ class RunnerBase:
         A property to get and create learning rate scheduler by split just in need.
         """
         if self._lr_sched is None:
-            lr_sched_cls = registry.get_lr_scheduler_class(self.config.run_cfg.lr_sched)
-
-            max_epoch = self.max_epoch
-            min_lr = self.min_lr
-            init_lr = self.init_lr
-
-            # optional parameters
-            decay_rate = self.config.run_cfg.get("lr_decay_rate", None)
-            warmup_start_lr = self.config.run_cfg.get("warmup_lr", -1)
-            warmup_steps = self.config.run_cfg.get("warmup_steps", 0)
-            iters_per_epoch = self.config.run_cfg.get("iters_per_epoch", None)
-
-            if iters_per_epoch is None:
-                try:
-                    iters_per_epoch = len(self.dataloaders['train'])
-                except (AttributeError, TypeError):
-                    iters_per_epoch = 10000
-
-            self._lr_sched = lr_sched_cls(
+            self._lr_sched = build_scheduler(
                 optimizer=self.optimizer,
-                max_epoch=max_epoch,
-                iters_per_epoch=iters_per_epoch,
-                min_lr=min_lr,
-                init_lr=init_lr,
-                decay_rate=decay_rate,
-                warmup_start_lr=warmup_start_lr,
-                warmup_steps=warmup_steps,
+                config=self.config,
+                dataloaders=self.dataloaders,
+                max_epoch=self.max_epoch,
+                min_lr=self.min_lr,
+                init_lr=self.init_lr,
             )
 
         return self._lr_sched
@@ -169,96 +106,15 @@ class RunnerBase:
     def dataloaders(self) -> dict:
         """
         A property to get and create dataloaders by split just in need.
-
-        If no train_dataset_ratio is provided, concatenate map-style datasets and
-        chain wds.DataPipe datasets separately. Training set becomes a tuple
-        (ConcatDataset, ChainDataset), both are optional but at least one of them is
-        required. The resultant ConcatDataset and ChainDataset will be sampled evenly.
-
-        If train_dataset_ratio is provided, create a MultiIterLoader to sample
-        each dataset by ratios during training.
-
-        Currently do not support multiple datasets for validation and test.
-
-        Returns:
-            dict: {split_name: (tuples of) dataloader}
         """
         if self._dataloaders is None:
-
-            # concatenate map-style datasets and chain wds.DataPipe datasets separately
-            # training set becomes a tuple (ConcatDataset, ChainDataset), both are
-            # optional but at least one of them is required. The resultant ConcatDataset
-            # and ChainDataset will be sampled evenly.
-            logging.info(
-                "dataset_ratios not specified, datasets will be concatenated (map-style datasets) or chained (webdataset.DataPipeline)."
+            self._dataloaders = build_dataloaders(
+                datasets=self.datasets,
+                config=self.config,
+                train_splits=self.train_splits,
+                use_distributed=self.use_distributed,
+                use_dist_eval_sampler=self.use_dist_eval_sampler
             )
-
-            datasets = reorg_datasets_by_split(self.datasets)
-            self.datasets = datasets
-            # self.datasets = concat_datasets(datasets)
-
-            # print dataset statistics after concatenation/chaining
-            for split_name in self.datasets:
-                if isinstance(self.datasets[split_name], tuple) or isinstance(
-                    self.datasets[split_name], list
-                ):
-                    # mixed wds.DataPipeline and torch.utils.data.Dataset
-                    num_records = sum(
-                        [
-                            len(d)
-                            if not type(d) in [wds.DataPipeline, ChainDataset]
-                            else 0
-                            for d in self.datasets[split_name]
-                        ]
-                    )
-
-                else:
-                    if hasattr(self.datasets[split_name], "__len__"):
-                        # a single map-style dataset
-                        num_records = len(self.datasets[split_name])
-                    else:
-                        # a single wds.DataPipeline
-                        num_records = -1
-                        logging.info(
-                            "Only a single wds.DataPipeline dataset, no __len__ attribute."
-                        )
-
-                if num_records >= 0:
-                    logging.info(
-                        "Loaded {} records for {} split from the dataset.".format(
-                            num_records, split_name
-                        )
-                    )
-
-            # create dataloaders
-            split_names = sorted(self.datasets.keys())
-
-            datasets = [self.datasets[split] for split in split_names]
-            is_trains = [split in self.train_splits for split in split_names]
-
-            batch_sizes = [
-                self.config.run_cfg.batch_size_train
-                if split == "train"
-                else self.config.run_cfg.batch_size_eval
-                for split in split_names
-            ]
-
-            collate_fns = []
-            for dataset in datasets:
-                if isinstance(dataset, tuple) or isinstance(dataset, list):
-                    collate_fns.append([getattr(d, "collater", None) for d in dataset])
-                else:
-                    collate_fns.append(getattr(dataset, "collater", None))
-
-            dataloaders = self.create_loaders(
-                datasets=datasets,
-                num_workers=self.config.run_cfg.num_workers,
-                batch_sizes=batch_sizes,
-                is_trains=is_trains,
-                collate_fns=collate_fns,
-            )
-
-            self._dataloaders = {k: v for k, v in zip(split_names, dataloaders)}
 
         return self._dataloaders
 
@@ -347,7 +203,7 @@ class RunnerBase:
         self.result_dir = result_dir
         self.output_dir = output_dir
     
-    def model_to_betrained(self):
+    def model_to_be_trained(self):
         if self.use_distributed:
             return self.model.module.to_be_trained()
         else:
@@ -370,7 +226,7 @@ class RunnerBase:
         if not self.evaluate_only:# with training
             for cur_epoch in range(self.start_epoch, self.max_epoch):
                 # training phase
-                if not self.evaluate_only and self.model_to_betrained():
+                if not self.evaluate_only and self.model_to_be_trained():
                     logging.info("Start training")
                     # having lora or IDs are used
                     train_stats = self.train_epoch(cur_epoch)
@@ -423,7 +279,7 @@ class RunnerBase:
 
                 if self.config.run_cfg.distributed:
                     dist.barrier()
-                if not self.model_to_betrained():
+                if not self.model_to_be_trained():
                     break
                 if not_change > 20:
                     logging.info("Early stop. The results has not changed up to 20 epochs.")
@@ -514,89 +370,6 @@ class RunnerBase:
             self.model.module.set_mode(mode)
         else:
             self.model.set_mode(mode)
-
-    def create_loaders(
-        self,
-        datasets,
-        num_workers,
-        batch_sizes,
-        is_trains,
-        collate_fns,
-        dataset_ratios=None,
-    ):
-        """
-        Create dataloaders for training and validation.
-        """
-
-        def _create_loader(dataset, num_workers, bsz, is_train, collate_fn):
-            # create a single dataloader for each split
-            if isinstance(dataset, ChainDataset) or isinstance(
-                dataset, wds.DataPipeline
-            ):
-                # wds.WebdDataset instance are chained together
-                # webdataset.DataPipeline has its own sampler and collate_fn
-                loader = iter(
-                    DataLoader(
-                        dataset,
-                        batch_size=bsz,
-                        num_workers=num_workers,
-                        pin_memory=True,
-                    )
-                )
-            else:
-                # map-style dataset are concatenated together
-                # setup distributed sampler
-                if self.use_distributed:
-                    sampler = DistributedSampler(
-                        dataset,
-                        shuffle=is_train,
-                        num_replicas=get_world_size(),
-                        rank=get_rank(),
-                    )
-                    if not self.use_dist_eval_sampler:
-                        # e.g. retrieval evaluation
-                        sampler = sampler if is_train else None
-                else:
-                    sampler = None
-
-                loader = DataLoader(
-                    dataset,
-                    batch_size=bsz,
-                    num_workers=num_workers,
-                    pin_memory=True,
-                    sampler=sampler,
-                    shuffle=sampler is None and is_train,
-                    collate_fn=collate_fn,
-                    drop_last=True if is_train else False,
-                )
-                loader = PrefetchLoader(loader)
-
-                if is_train:
-                    loader = IterLoader(loader, use_distributed=self.use_distributed)
-
-            return loader
-
-        loaders = []
-
-        for dataset, bsz, is_train, collate_fn in zip(
-            datasets, batch_sizes, is_trains, collate_fns
-        ):
-            if isinstance(dataset, list) or isinstance(dataset, tuple):
-                if hasattr(dataset[0], 'sample_ratio') and dataset_ratios is None:
-                    dataset_ratios = [d.sample_ratio for d in dataset]
-                loader = MultiIterLoader(
-                    loaders=[
-                        _create_loader(d, num_workers, bsz, is_train, collate_fn[i])
-                        for i, d in enumerate(dataset)
-                    ],
-                    ratios=dataset_ratios,
-                )
-            else:
-                loader = _create_loader(dataset, num_workers, bsz, is_train, collate_fn)
-
-            loaders.append(loader)
-
-        return loaders
 
     @main_process
     def _save_checkpoint(self, cur_epoch, is_best=False):
