@@ -234,6 +234,24 @@ class QRecLLM(Rec2Base):
         return sample_embeds, atts_samples
 
     def encode_rec_features_to_llm_v2(self, sample, placeholder_order=None):
+        """
+        Encodes recommendation features (User, History, Target) into LLM embedding space.
+        
+        Args:
+            sample (dict): Dictionary containing:
+                - 'UserID': (B,)
+                - 'TargetItemID': (B,)
+                - 'InteractedItemIDs_pad': (B, L)
+            placeholder_order (list): Order of features, e.g., ["<UserID>", "<ItemIDList>", "<TargetItemID>"]
+            
+        Returns:
+            sample_embeds_llama (dict):
+                - 'User_emb': (B, 1, H) - Individual user representation
+                - 'TargetItem_emb': (B, 1, H) - Individual target item representation
+                - 'InteractedItems_embs': (B, L, H) - Historical items (includes padding)
+                - 'merged_embs': (N, H) - Flattened & filtered valid tokens for LLM input
+            sample_atts_llama: None (Placeholder for future attention masks)
+        """
         if self.rec_encoder is None:
             return None, None
 
@@ -252,14 +270,8 @@ class QRecLLM(Rec2Base):
             # --- user embedding ---
             if self.rec_model_type == "sasrec":
                 raise NotImplementedError("sasrec is not implemented in this version")
-                # user_embeds = self.rec_encoder.seq_encoder(sample["sas_seq"]).unsqueeze(-2)
             elif self.rec_model_type in ("DCN", "DIN"):
                 raise NotImplementedError("DCN and DIN are not implemented in this version")
-                # user_embeds = self.rec_encoder.all_encode(
-                #     sample["UserID"],
-                #     sample["TargetItemID"],
-                #     sample["sas_seq"][:, -10:]
-                # ).unsqueeze(-2)
             else:
                 user_embeds = self.rec_encoder.user_encoder(sample["UserID"], all_users=all_user_embeds).unsqueeze(-2)
 
@@ -270,9 +282,6 @@ class QRecLLM(Rec2Base):
             user_llama = self.llama_proj(user_embeds).reshape(B, -1, self.proj_token_num, H)
             target_llama = self.llama_proj(target_item_embeds).reshape(B, -1, self.proj_token_num, H)
 
-            user_llama_flat = user_llama.reshape(B, -1, H)
-            target_llama_flat = target_llama.reshape(B, -1, H)
-
             interacted_llama_flat = None
             merged_flat = None
 
@@ -282,38 +291,49 @@ class QRecLLM(Rec2Base):
             if need_merge:
                 interacted = self.rec_encoder.item_encoder(sample["InteractedItemIDs_pad"], all_items=all_item_embeds)
                 interacted_llama = self.llama_proj(interacted).reshape(B, -1, self.proj_token_num, H)
+                
+                # internal mapping for embeddings and masks
+                ph2emb = {
+                    "<UserID>": user_llama,
+                    "<ItemIDList>": interacted_llama,
+                    "<TargetItemID>": target_llama
+                }
+
+                # Create historical item mask (0 for padding, 1 for real items)
+                item_mask = torch.ones_like(sample['InteractedItemIDs_pad'])
+                item_mask = torch.where(sample['InteractedItemIDs_pad'] == self.rec_encoder.padding_index, 0, item_mask)
+
+                ph2mask = {
+                    "<UserID>": torch.ones([B, 1], device=item_mask.device, dtype=item_mask.dtype),
+                    "<ItemIDList>": item_mask,
+                    "<TargetItemID>": torch.ones([B, 1], device=item_mask.device, dtype=item_mask.dtype)
+                }
+
+                # 3. Concatenate tensors based on the placeholder_order
+                # Concat on the sequence dimension (dim 1)
+                merged_embeds = torch.cat([ph2emb[ph] for ph in placeholder_order], dim=1) 
+                
+                # Concat masks to identify non-padded positions
+                full_mask = torch.cat([ph2mask[ph] for ph in placeholder_order], dim=1).to(device)
+                
+                # 4. Extract valid embeddings using the mask
+                idx_nopad = torch.nonzero(full_mask) # Get (N, 2) indices
+                
+                # Index into 4D tensor and flatten to (Total_Valid_Tokens, H)
+                # Results in shape: (Total_Items * proj_token_num, H)
+                merged_flat = merged_embeds[idx_nopad[:, 0], idx_nopad[:, 1]].reshape(-1, H)
+
+                # Prepare separate flattened versions for output dictionary
                 interacted_llama_flat = interacted_llama.reshape(B, -1, H)
 
-                # map placeholder -> embedding block
-                ph2emb = {
-                    "<UserID>": user_llama_flat,                 # (B, U, H)
-                    "<ItemIDList>": interacted_llama_flat,       # (B, I, H)
-                    "<TargetItemID>": target_llama_flat          # (B, T, H)
-                }
-
-                # concat theo placeholder_order
-                merged = torch.cat([ph2emb[ph] for ph in placeholder_order], dim=1)  # (B, U+I+T, H)
-
-                # mask padding cho ItemIDList
-                item_ids = sample["InteractedItemIDs_pad"]
-                item_mask = torch.where(item_ids == self.rec_encoder.padding_index, 0, 1)  # (B, I)
-                ph2mask = {
-                    "<UserID>": torch.ones((B, 1), device=item_mask.device, dtype=item_mask.dtype),
-                    "<ItemIDList>": item_mask,
-                    "<TargetItemID>": torch.ones((B, 1), device=item_mask.device, dtype=item_mask.dtype),
-                }
-                full_mask = torch.cat([ph2mask[ph] for ph in placeholder_order], dim=1).to(device)  # (B, U+I+T)
-
-                idx_nopad = torch.nonzero(full_mask)  # (N, 2)
-                merged_flat = merged[idx_nopad[:, 0], idx_nopad[:, 1]].reshape(-1, H)  # (N, H)
-
+            # --- Final output dictionary ---
             sample_embeds_llama = {
-                "User_emb": user_llama_flat,
-                "TargetItem_emb": target_llama_flat,
+                "User_emb": user_llama.reshape(B, -1, H),
+                "TargetItem_emb": target_llama.reshape(B, -1, H),
                 "InteractedItems_embs": interacted_llama_flat,
                 "merged_embs": merged_flat,
-                # 'loss_c': loss_c
             }
+
         sample_atts_llama = None
         # {
         #     'user': atts_user,
