@@ -226,12 +226,6 @@ class QRecLLM(Rec2Base):
                 positions.append((pos, ph))
         positions.sort(key=lambda x: x[0])
         return [ph for _, ph in positions]
-    
-    def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
-        feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
-        rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(batch_data, feature_order=feature_order)
-        llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
-        return llm_embeds, llm_atts
 
     def encode_rec_features_to_llm_v2(self, batch_data, feature_order=None):
         """
@@ -409,15 +403,94 @@ class QRecLLM(Rec2Base):
 
         return inputs_embeds, prompts_tokens.attention_mask
 
+    def assemble_llm_sequences(self, input_embeds, input_atts, label_embeds, label_atts):
+        full_embeds = torch.cat([input_embeds, label_embeds], dim=1)
+        full_atts = torch.cat([input_atts, label_atts], dim=1)
+        return full_embeds, full_atts
+
+    def prepare_llm_targets(self, input_atts, label_tokens):
+        batch_size, input_len = input_atts.shape
+        device = input_atts.device
+        
+        empty_targets = torch.full((batch_size, input_len), -100, device=device)
+        
+        label_targets = label_tokens.input_ids.masked_fill(
+            label_tokens.input_ids == self.llama_tokenizer.pad_token_id, -100
+        )
+        
+        return torch.cat([empty_targets, label_targets], dim=1)
+
+    def execute_llm_forward(self, embeds, atts, targets):
+        with self.maybe_autocast():
+            model = self.llama_model_lora if self.use_lora else self.llama_model
+            return model(
+                inputs_embeds=embeds,
+                attention_mask=atts,
+                labels=targets,
+                return_dict=True
+            )
+
+    def calculate_recommendation_loss(self, outputs, label_tokens, batch_data, ans_map):
+        pos_id = self.llama_tokenizer(ans_map[1], add_special_tokens=False).input_ids[0]
+        label_seq_len = label_tokens.input_ids.shape[-1]
+        
+        prediction_logits = outputs.logits[:, -(label_seq_len + 1), :]
+        target_logits = prediction_logits[:, pos_id]
+        
+        loss = nn.functional.binary_cross_entropy_with_logits(
+            target_logits, 
+            batch_data['label'].float()
+        )
+        
+        return loss
+
+    def build_llm_outputs_from_labels(self, batch_data):
+        device = batch_data['UserID'].device
+        ans_map = {1: self.pos_ans[0], 0: self.neg_ans[0]}
+        text_labels = [ans_map[int(label)] for label in batch_data["label"]]
+
+        self.llama_tokenizer.padding_side = "right"
+        label_tokens = self.llama_tokenizer(
+            text_labels,
+            return_tensors="pt",
+            padding="longest",
+            truncation=True,
+            max_length=self.max_txt_len,
+            add_special_tokens=False
+        ).to(device)
+
+        embed_layer = self.llama_model.get_input_embeddings()
+        label_embeds = embed_layer(label_tokens.input_ids)
+
+        return label_embeds, label_tokens, ans_map
+
+    def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
+        feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
+        rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(batch_data, feature_order=feature_order)
+        llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
+        return llm_embeds, llm_atts
+
+    def forward_v2(self, batch_data):
+        prompt = random.choices(self.prompt_list, weights=[5, 5, 5, 1], k=1)[0]
+        input_embeds, input_atts = self.build_llm_inputs_from_prompt_v2(prompt, batch_data)
+        label_embeds, label_tokens, ans_map = self.build_llm_outputs_from_labels(batch_data)
+
+        full_embeds, full_atts = self.assemble_llm_sequences(
+            input_embeds, input_atts, label_embeds, label_tokens.attention_mask
+        )
+        
+        targets = self.prepare_llm_targets(input_atts, label_tokens)
+        
+        outputs = self.execute_llm_forward(full_embeds, full_atts, targets)
+        loss = self.calculate_recommendation_loss(outputs, label_tokens, batch_data, ans_map)
+
+        return {"loss": loss}
+
     def forward(self, samples):
         if self.run_mode_ == 'v2':
             return self.forward_v2(samples)
         else:
             raise NotImplementedError("Only forward_v2 is implemented in this version")
-        
-    def forward_v2(self, samples):
-        if self.prompt_list:
-            prompt = random.choices(self.prompt_list, weights=[5,5,5,1], k=1)[0] #[1,5,3,1]  #[2,5,3,1]
 
     @classmethod
     def from_config(cls, cfg):
