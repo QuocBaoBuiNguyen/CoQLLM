@@ -227,42 +227,42 @@ class QRecLLM(Rec2Base):
         positions.sort(key=lambda x: x[0])
         return [ph for _, ph in positions]
     
-    def build_llm_inputs_from_prompt_v2(self, prompt, samples):
-        placeholder_order = self.get_placeholder_order(prompt) if prompt else None
-        samples_encode, atts_samples = self.encode_rec_features_to_llm_v2(samples, placeholder_order=placeholder_order)
-        sample_embeds, atts_samples = self.wrap_prompt_with_soft_tokens_v2(samples_encode, samples, atts_samples, prompt)
-        return sample_embeds, atts_samples
+    def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
+        feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
+        rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(batch_data, feature_order=feature_order)
+        llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
+        return llm_embeds, llm_atts
 
-    def encode_rec_features_to_llm_v2(self, sample, placeholder_order=None):
+    def encode_rec_features_to_llm_v2(self, batch_data, feature_order=None):
         """
         Encodes recommendation features (User, History, Target) into LLM embedding space.
         
         Args:
-            sample (dict): Dictionary containing:
+            batch_data (dict): Dictionary containing:
                 - 'UserID': (B,)
                 - 'TargetItemID': (B,)
                 - 'InteractedItemIDs_pad': (B, L)
-            placeholder_order (list): Order of features, e.g., ["<UserID>", "<ItemIDList>", "<TargetItemID>"]
+            feature_order (list): Order of features, e.g., ["<UserID>", "<ItemIDList>", "<TargetItemID>"]
             
         Returns:
-            sample_embeds_llama (dict):
+            rec_embeds (dict):
                 - 'User_emb': (B, 1, H) - Individual user representation
                 - 'TargetItem_emb': (B, 1, H) - Individual target item representation
                 - 'InteractedItems_embs': (B, L, H) - Historical items (includes padding)
                 - 'merged_embs': (N, H) - Flattened & filtered valid tokens for LLM input
-            sample_atts_llama: None (Placeholder for future attention masks)
+            rec_atts: None (Placeholder for future attention masks)
         """
         if self.rec_encoder is None:
             return None, None
 
-        device = sample["UserID"].device
+        device = batch_data["UserID"].device
         if self.low_resource:
             self.rec_to_cpu()
-            for k in sample:
-                sample[k] = sample[k].to("cpu")
+            for k in batch_data:
+                batch_data[k] = batch_data[k].to("cpu")
 
         with self.maybe_autocast():
-            B = sample["UserID"].shape[0]
+            B = batch_data["UserID"].shape[0]
             H = self.llama_model.config.hidden_size
 
             all_user_embeds, all_item_embeds = self.rec_encoder.compute()
@@ -273,10 +273,10 @@ class QRecLLM(Rec2Base):
             elif self.rec_model_type in ("DCN", "DIN"):
                 raise NotImplementedError("DCN and DIN are not implemented in this version")
             else:
-                user_embeds = self.rec_encoder.user_encoder(sample["UserID"], all_users=all_user_embeds).unsqueeze(-2)
+                user_embeds = self.rec_encoder.user_encoder(batch_data["UserID"], all_users=all_user_embeds).unsqueeze(-2)
 
             # --- target item embedding ---
-            target_item_embeds = self.rec_encoder.item_encoder(sample["TargetItemID"], all_items=all_item_embeds).unsqueeze(-2)
+            target_item_embeds = self.rec_encoder.item_encoder(batch_data["TargetItemID"], all_items=all_item_embeds).unsqueeze(-2)
 
             # --- project to space llama ---
             user_llama = self.llama_proj(user_embeds).reshape(B, -1, self.proj_token_num, H)
@@ -285,11 +285,11 @@ class QRecLLM(Rec2Base):
             interacted_llama_flat = None
             merged_flat = None
 
-            has_interacted = "InteractedItemIDs_pad" in sample
-            need_merge = has_interacted and placeholder_order is not None and len(placeholder_order) == 3
+            has_interacted = "InteractedItemIDs_pad" in batch_data
+            need_merge = has_interacted and feature_order is not None and len(feature_order) == 3
 
             if need_merge:
-                interacted = self.rec_encoder.item_encoder(sample["InteractedItemIDs_pad"], all_items=all_item_embeds)
+                interacted = self.rec_encoder.item_encoder(batch_data["InteractedItemIDs_pad"], all_items=all_item_embeds)
                 interacted_llama = self.llama_proj(interacted).reshape(B, -1, self.proj_token_num, H)
                 
                 # internal mapping for embeddings and masks
@@ -300,8 +300,8 @@ class QRecLLM(Rec2Base):
                 }
 
                 # Create historical item mask (0 for padding, 1 for real items)
-                item_mask = torch.ones_like(sample['InteractedItemIDs_pad'])
-                item_mask = torch.where(sample['InteractedItemIDs_pad'] == self.rec_encoder.padding_index, 0, item_mask)
+                item_mask = torch.ones_like(batch_data['InteractedItemIDs_pad'])
+                item_mask = torch.where(batch_data['InteractedItemIDs_pad'] == self.rec_encoder.padding_index, 0, item_mask)
 
                 ph2mask = {
                     "<UserID>": torch.ones([B, 1], device=item_mask.device, dtype=item_mask.dtype),
@@ -309,12 +309,12 @@ class QRecLLM(Rec2Base):
                     "<TargetItemID>": torch.ones([B, 1], device=item_mask.device, dtype=item_mask.dtype)
                 }
 
-                # 3. Concatenate tensors based on the placeholder_order
+                # 3. Concatenate tensors based on the feature_order
                 # Concat on the sequence dimension (dim 1)
-                merged_embeds = torch.cat([ph2emb[ph] for ph in placeholder_order], dim=1) 
+                merged_embeds = torch.cat([ph2emb[ph] for ph in feature_order], dim=1) 
                 
                 # Concat masks to identify non-padded positions
-                full_mask = torch.cat([ph2mask[ph] for ph in placeholder_order], dim=1).to(device)
+                full_mask = torch.cat([ph2mask[ph] for ph in feature_order], dim=1).to(device)
                 
                 # 4. Extract valid embeddings using the mask
                 idx_nopad = torch.nonzero(full_mask) # Get (N, 2) indices
@@ -327,23 +327,87 @@ class QRecLLM(Rec2Base):
                 interacted_llama_flat = interacted_llama.reshape(B, -1, H)
 
             # --- Final output dictionary ---
-            sample_embeds_llama = {
+            rec_embeds = {
                 "User_emb": user_llama.reshape(B, -1, H),
                 "TargetItem_emb": target_llama.reshape(B, -1, H),
                 "InteractedItems_embs": interacted_llama_flat,
                 "merged_embs": merged_flat,
             }
 
-        sample_atts_llama = None
+        rec_atts = None
         # {
         #     'user': atts_user,
         #     'TargetItem': atts_targetItem,
         #     'InteractedItems': atts_interactedItem
         # }
-        return sample_embeds_llama, sample_atts_llama
+        return rec_embeds, rec_atts
 
-    def wrap_prompt_with_soft_tokens_v2(self, prompt, rec_features):
-        return
+    def wrap_prompt_with_soft_tokens_v2(self, rec_embeds, rec_atts, batch_data, prompt_template):
+        if not prompt_template:
+             return None, None
+        
+        prompt_ori = prompt_template
+        batch_size = batch_data['UserID'].shape[0]
+        bos = self.llama_tokenizer.bos_token if self.llama_tokenizer.bos_token else "<s>"
+        
+        unk_token = self.llama_tokenizer.unk_token
+        unk_seq = "".join([unk_token] * self.proj_token_num) 
+        
+        prompt_template = bos + prompt_template 
+        prompt_template = prompt_template.replace("<UserID>", unk_seq)
+        prompt_template = prompt_template.replace("<TargetItemID>", unk_seq)
+        # prompt_template = prompt_template.replace("<DCNFeature>", unk_seq)
+
+        prompt_list = []
+        for k in range(batch_size):
+            current_prompt = prompt_template
+            
+            if 'InteractedItemIDs_pad' in batch_data:
+                valid_items = (batch_data['InteractedItemIDs_pad'][k] != self.rec_encoder.padding_index).sum().item()
+                item_list_placeholder = "".join([unk_seq] * valid_items)
+                current_prompt = current_prompt.replace('<ItemIDList>', item_list_placeholder)
+
+            if "<ItemTitleList>" in current_prompt and 'InteractedItemTitles' in batch_data:
+                 current_prompt = current_prompt.replace("<ItemTitleList>", str(batch_data['InteractedItemTitles'][k]))
+            
+            if "<TargetItemTitle>" in current_prompt and 'TargetItemTitle' in batch_data:
+                 current_prompt = current_prompt.replace("<TargetItemTitle>", str(batch_data['TargetItemTitle'][k]))
+
+            prompt_list.append(current_prompt)
+        
+        if not self.has_print_prompt:
+            log_step("prompt example:", random.choice(prompt_list))
+            self.has_print_prompt = True
+
+        self.llama_tokenizer.padding_side = "left"
+        prompts_tokens = self.llama_tokenizer(
+            prompt_list,
+            return_tensors="pt",
+            padding="longest",
+            truncation=True,
+            max_length=self.max_txt_len,
+            add_special_tokens=False
+        ).to(batch_data['UserID'].device)
+
+        unk_token_id = self.llama_tokenizer.unk_token_id
+        
+        embed_layer = self.llama_model.get_input_embeddings()
+        inputs_embeds = embed_layer(prompts_tokens.input_ids)
+
+        replaced_idx = torch.nonzero(prompts_tokens.input_ids == unk_token_id)
+        
+        if "<UserID>" in prompt_ori and "<TargetItemID>" in prompt_ori and "<ItemIDList>" in prompt_ori:
+            inputs_embeds[replaced_idx[:, 0], replaced_idx[:, 1]] = rec_embeds['merged_embs'].to(inputs_embeds)
+
+        elif "<UserID>" in prompt_ori and "<TargetItemID>" in prompt_ori and "<ItemIDList>" not in prompt_ori:
+            emb_to_inject = torch.cat([rec_embeds['User_emb'], rec_embeds['TargetItem_emb']], dim=1)
+            emb_to_inject = emb_to_inject.reshape(-1, emb_to_inject.shape[-1])
+            inputs_embeds[replaced_idx[:, 0], replaced_idx[:, 1]] = emb_to_inject.to(inputs_embeds.dtype)
+
+        elif "<DCNFeature>" in prompt_ori:
+            raise NotImplementedError("<DCNFeature> is not implemented in this version")
+
+        return inputs_embeds, prompts_tokens.attention_mask
 
     def forward(self, samples):
         if self.run_mode_ == 'v2':
