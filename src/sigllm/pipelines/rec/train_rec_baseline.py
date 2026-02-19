@@ -101,7 +101,7 @@ def train_baseline_model(train_config, log_file=None, save_mode=False, save_file
     # 1. Setup Environment
     set_seed(2025)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    data_dir = "/content/datasets/ml-1m/"
+    data_dir = "/content/SigLLM/data/processed/ml-1m/"
     
     # 2. Load and Filter Data
     train_data = pd.read_pickle(data_dir+"train_ood2.pkl")[['uid','iid','label']].values
