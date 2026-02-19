@@ -243,15 +243,15 @@ def build_ml1m(
 
     # Persist processed artifacts
     os.makedirs(out_dir, exist_ok=True)
-    train_path = os.path.join(out_dir, "train_seq.pkl")
-    valid_path = os.path.join(out_dir, "valid_seq.pkl")
-    test_path = os.path.join(out_dir, "test_seq.pkl")
+    train_path = os.path.join(out_dir, "train_ood2.pkl")
+    valid_path = os.path.join(out_dir, "valid_ood2.pkl")
+    test_path = os.path.join(out_dir, "test_ood2.pkl")
     train_.to_pickle(train_path)
     valid_.to_pickle(valid_path)
     test_.to_pickle(test_path)
 
     valid_small = valid_.sample(frac=0.5, random_state=2023)
-    valid_small_path = os.path.join(out_dir, "valid_small_seq.pkl")
+    valid_small_path = os.path.join(out_dir, "valid_small_ood2.pkl")
     valid_small.to_pickle(valid_small_path)
 
     users_map_path = os.path.join(out_dir, "users_map.pkl")
