@@ -208,13 +208,13 @@ def train_baseline_model(train_config, log_file=None, save_mode=False, save_file
                 break
 
     # 6. Final Logging
-    final_log = f"Train Config: {train_config}\nBest Results: {stopper.best_full_metrics}"
+    final_log = f"Train Config: {train_config}\nBest Results: {stopper.best_full_metric}"
     log_step(final_log)
     if log_file:
         log_file.write(final_log + "\n")
         log_file.flush()
 
-    return stopper.best_full_metrics
+    return stopper.best_full_metric
 
 if __name__ == "__main__":
     train_config = {
