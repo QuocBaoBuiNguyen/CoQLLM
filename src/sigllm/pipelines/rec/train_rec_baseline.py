@@ -129,8 +129,8 @@ def train_baseline_model(train_config, log_file=None, save_mode=False, save_file
     
     # 3. Model & Optimizer Initialization
     mf_config = omegaconf.OmegaConf.create({
-        "user_num": user_num,
-        "item_num": item_num,
+        "user_num": int(user_num),
+        "item_num": int(item_num),
         "embedding_size": int(train_config['embedding_size'])
     })
 
