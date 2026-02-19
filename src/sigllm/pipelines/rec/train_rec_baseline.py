@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import time as time
 import random
@@ -225,5 +226,6 @@ if __name__ == "__main__":
         "patience":50,
         "batch_size":1024
     }
-    save_file = "/content/mf/mf_model.pth"
+    save_file = "/content/SigLLM/mf/mf_model.pth"
+    os.makedirs(os.path.dirname(save_file), exist_ok=True)
     train_baseline_model(train_config, save_mode=True, save_file=save_file, need_train=True, warm_or_cold='warm')
