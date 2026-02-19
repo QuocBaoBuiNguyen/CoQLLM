@@ -17,7 +17,7 @@ def log_step(title: str, detail: Optional[str] = None) -> None:
 
 
 def process_warm_cold(
-    data_dir: str = "/content/SigLLM/datasets/ml-1m/",
+    data_dir: str = "/content/SigLLM/data/processed/ml-1m/",
     min_user_inter: int = 3,
     min_item_inter: int = 3
 ) -> pd.DataFrame:
