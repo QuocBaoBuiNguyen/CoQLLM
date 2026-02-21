@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class QRecInstructAlignmentModel(nn.Module):
     """Instruction-conditioned alignment with injected encoders."""
@@ -62,3 +63,28 @@ class QRecInstructAlignmentModel(nn.Module):
         item_z = self.enc_item(i_idx, ins_tok_emb)
         text_z = self.text_vec(text_list, device)
         return {"user": user_z, "item": item_z, "text": text_z}
+
+    @staticmethod
+    def l2norm(x: torch.Tensor) -> torch.Tensor:
+        return x / (x.norm(dim=-1, keepdim=True) + 1e-12)
+
+    @staticmethod
+    def loss_user_item(u_vec: torch.Tensor, i_pos_vec: torch.Tensor, i_neg_vecs: torch.Tensor, tau: float = 0.07):
+        u = QRecInstructAlignmentModel.l2norm(u_vec)
+        pos = QRecInstructAlignmentModel.l2norm(i_pos_vec)
+        neg = QRecInstructAlignmentModel.l2norm(i_neg_vecs)
+
+        pos_logit = (u * pos).sum(-1, keepdim=True) / tau
+        neg_logit = (u.unsqueeze(1) * neg).sum(-1) / tau
+
+        logits = torch.cat([pos_logit, neg_logit], dim=1)
+        labels = torch.zeros(u.size(0), dtype=torch.long, device=u.device)
+        return F.cross_entropy(logits, labels)
+
+    @staticmethod
+    def loss_item_text(i_vec: torch.Tensor, t_vec: torch.Tensor, tau: float = 0.07):
+        i = QRecInstructAlignmentModel.l2norm(i_vec)
+        t = QRecInstructAlignmentModel.l2norm(t_vec)
+        logits = (i @ t.T) / tau
+        labels = torch.arange(i.size(0), device=i.device)
+        return F.cross_entropy(logits, labels)
