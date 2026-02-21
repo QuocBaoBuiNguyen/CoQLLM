@@ -24,6 +24,7 @@ def deal_with_each_u(x, u):
     items = np.array(x.iid)
     labels = np.array(x.label)
     titles = np.array(x.title)
+    genres = np.array(x.genres)
     timestamp = np.array(x.timestamp)
     flags = np.array(x.flag)
     his = [0]  # adding a '0' by default
@@ -31,7 +32,7 @@ def deal_with_each_u(x, u):
     results = []
     for i in range(items.shape[0]):
         results.append(
-            (u, items[i], timestamp[i], np.array(his), copy.copy(his_title), titles[i], labels[i], flags[i])
+            (u, items[i], timestamp[i], np.array(his), copy.copy(his_title), titles[i], labels[i], genres[i], flags[i])
         )
         if labels[i] > 0:
             his.append(items[i])
@@ -154,7 +155,7 @@ def build_ml1m(
     log_step("[8/10] Concatenate & sort", "order by (uid, timestamp)")
 
     u_inter_all = data.groupby("uid").agg(
-        {"iid": list, "label": list, "title": list, "timestamp": list, "flag": list}
+        {"iid": list, "label": list, "title": list, "genres": list, "timestamp": list, "flag": list}
     )
     log_step("Grouped interactions", f"users={u_inter_all.shape[0]:,}")
 
@@ -166,7 +167,7 @@ def build_ml1m(
     for u in u_inter_all.index:
         results.extend(deal_with_each_u(u_inter_all.loc[u], u))
 
-    u_, i_, time_, label_, his_, his_title, title_, flag_ = [], [], [], [], [], [], [], []
+    u_, i_, time_, label_, his_, his_title, title_, genres_, flag_ = [], [], [], [], [], [], [], [], []
     for re_ in results:
         u_.append(re_[0])
         i_.append(re_[1])
@@ -175,7 +176,8 @@ def build_ml1m(
         his_title.append(re_[4])
         title_.append(re_[5])
         label_.append(re_[6])
-        flag_.append(re_[7])
+        genres_.append(re_[7])
+        flag_.append(re_[8])
 
     data = pd.DataFrame(
         {
@@ -186,6 +188,7 @@ def build_ml1m(
             "his": his_,
             "his_title": his_title,
             "title": title_,
+            "genres": genres_,
             "flag": flag_,
         }
     )
