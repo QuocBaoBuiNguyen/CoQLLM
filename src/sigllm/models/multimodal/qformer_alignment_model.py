@@ -1,67 +1,64 @@
 import torch
 import torch.nn as nn
-from transformers import LlamaTokenizer, LlamaForCausalLM
 
-from sigllm.models.rec.matrix_factorization import MatrixFactorization
-from sigllm.models.q_former.q_former import QFormer
+class QRecInstructAlignmentModel(nn.Module):
+    """Instruction-conditioned alignment with injected encoders."""
 
-
-class QFormerAlignmentModel(nn.Module):
-    """CF + shared Q-Former + text encoder for alignment."""
-
-    def __init__(
-        self,
-        mf_config,
-        d_model: int,
-        num_queries: int = 8,
-        num_heads: int = 8,
-        llama_model: str = "",
-    ) -> None:
+    def __init__(self, mf, qformer, llama_tokenizer, llama_model) -> None:
         super().__init__()
-        self.cf = MatrixFactorization(mf_config)
-        d_cf = mf_config.embedding_size
-        self.qformer = QFormer(d_cf=d_cf, d_model=d_model, num_queries=num_queries, num_heads=num_heads)
+        self.mf = mf
+        self.qformer = qformer
+        self.tok = llama_tokenizer
+        self.llama = llama_model
 
-        self.tokenizer = LlamaTokenizer.from_pretrained(llama_model, use_fast=False)
-        self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.text_encoder = LlamaForCausalLM.from_pretrained(llama_model)
+        d = llama_model.config.hidden_size
+        self.p_user = nn.Linear(d, d)
+        self.p_item = nn.Linear(d, d)
+        self.p_text = nn.Linear(d, d)
 
-        self.p_user = nn.Linear(d_model, d_model)
-        self.p_item = nn.Linear(d_model, d_model)
-        self.p_text = nn.Linear(self.text_encoder.config.hidden_size, d_model)
+        for p in self.llama.parameters():
+            p.requires_grad = False
 
-    def encode_user(self, u_idx: torch.Tensor) -> torch.Tensor:
-        cf_vec = self.cf.user_encoder(u_idx)
-        q_tokens = self.qformer(cf_vec)
-        pooled = q_tokens.mean(dim=1)
-        return self.p_user(pooled)
+    def pool_queries(self, q_tokens: torch.Tensor) -> torch.Tensor:
+        return q_tokens.mean(dim=1)
 
-    def encode_item(self, i_idx: torch.Tensor) -> torch.Tensor:
-        cf_vec = self.cf.item_encoder(i_idx)
-        q_tokens = self.qformer(cf_vec)
-        pooled = q_tokens.mean(dim=1)
-        return self.p_item(pooled)
-
-    def encode_text(self, text_list: list[str]) -> torch.Tensor:
-        tokens = self.tokenizer(
+    def llama_embed_tokens_and_pool(self, tok, llama, text_list, device, max_len: int):
+        tokens = tok(
             text_list,
             return_tensors="pt",
             padding=True,
             truncation=True,
-        ).to(self.p_text.weight.device)
-        embeds = self.text_encoder.get_input_embeddings()(tokens.input_ids)
+            max_length=max_len,
+        ).to(device)
+        embeds = llama.get_input_embeddings()(tokens.input_ids)
         mask = tokens.attention_mask.unsqueeze(-1)
         summed = (embeds * mask).sum(dim=1)
         denom = mask.sum(dim=1).clamp(min=1)
         pooled = summed / denom
+        return embeds, pooled
+
+    def ins_tokens(self, ins_list, device):
+        ins_tok_emb, _ = self.llama_embed_tokens_and_pool(self.tok, self.llama, ins_list, device, max_len=48)
+        return ins_tok_emb
+
+    def text_vec(self, text_list, device):
+        _, pooled = self.llama_embed_tokens_and_pool(self.tok, self.llama, text_list, device, max_len=64)
         return self.p_text(pooled)
 
-    def forward(self, u_idx: torch.Tensor, i_idx: torch.Tensor, text_list: list[str]):
-        user_z = self.encode_user(u_idx)
-        item_z = self.encode_item(i_idx)
-        text_z = self.encode_text(text_list)
-        return {
-            "user": user_z,
-            "item": item_z,
-            "text": text_z,
-        }
+    def enc_user(self, u_ids, ins_tok_emb):
+        u_cf = self.mf.user_encoder(u_ids)
+        u_q = self.qformer(u_cf, ins_tok_emb)
+        return self.p_user(self.pool_queries(u_q))
+
+    def enc_item(self, i_ids, ins_tok_emb):
+        i_cf = self.mf.item_encoder(i_ids)
+        i_q = self.qformer(i_cf, ins_tok_emb)
+        return self.p_item(self.pool_queries(i_q))
+
+    def forward(self, u_idx: torch.Tensor, i_idx: torch.Tensor, ins_list: list[str], text_list: list[str]):
+        device = u_idx.device
+        ins_tok_emb = self.ins_tokens(ins_list, device)
+        user_z = self.enc_user(u_idx, ins_tok_emb)
+        item_z = self.enc_item(i_idx, ins_tok_emb)
+        text_z = self.text_vec(text_list, device)
+        return {"user": user_z, "item": item_z, "text": text_z}
