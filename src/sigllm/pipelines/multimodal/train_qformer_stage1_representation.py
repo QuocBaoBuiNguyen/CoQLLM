@@ -96,7 +96,9 @@ def _init_text_encoder(cfg, device):
     if cfg.get("freeze_text_encoder", True):
         for p in text_encoder.parameters():
             p.requires_grad = False
-            
+        text_encoder.eval()
+        text_encoder.train = disabled_train.__get__(text_encoder, TextEncoder)
+
     return text_encoder, text_encoder.model.config.hidden_size
 
 
