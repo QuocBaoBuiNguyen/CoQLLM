@@ -202,8 +202,8 @@ def main():
         "epoch": 10,
         "text_model_name": "bert-base-uncased",
         "text_d_model": 768,
-        "pretrained_rec_path": "not_have",
-        "freeze_rec": False,
+        "pretrained_rec_path": "/content/SigLLM/mf/mf_model.pth",
+        "freeze_rec": True,
         "freeze_text_encoder": True,
     }
 
