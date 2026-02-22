@@ -16,8 +16,6 @@ LOGGER = NotebookLogger.rich_logger("sigllm.qformer_alignment_dataset")
 
 
 def log_step(title: str, detail: Optional[str] = None) -> None:
-    """Emit a compact log line with optional detail string."""
-
     message = title if detail is None else f"{title} | {detail}"
     LOGGER.info(message)
 
@@ -34,10 +32,24 @@ TEMPL_GENRE = [
 
 
 class QFormerAlignmentDataset(RecBaseDataset):
-    def __init__(self, config, filename: str, neg_k: int = 5, hard_k: int = 8, p_fixed: float = 0.8) -> None:
+    def __init__(
+        self,
+        config,
+        filename: str,
+        neg_k: int = 5,
+        hard_k: int = 8,
+        p_fixed: float = 0.8,
+        seed: int = 42,
+    ) -> None:
         self.neg_k = neg_k
         self.hard_k = hard_k
         self.p_fixed = p_fixed
+        self.seed = int(seed)
+
+        self._py_rng = random.Random(self.seed)
+        self._np_rng = np.random.default_rng(self.seed)
+        self._torch_gen = torch.Generator()
+        self._torch_gen.manual_seed(self.seed)
 
         dataset_config = config
         ann_path = dataset_config.build_info.storage / filename
@@ -55,7 +67,6 @@ class QFormerAlignmentDataset(RecBaseDataset):
         self.all_items = set(df["iid"].unique().tolist())
         self.user_pos_items = pos_df.groupby("uid")["iid"].apply(set).to_dict()
 
-        # Genre maps (assumed present)
         self.item_genres = {}
         for iid, genres in df[["iid", "genres"]].drop_duplicates().itertuples(index=False):
             gset = {g for g in str(genres).split("|") if g}
@@ -75,8 +86,13 @@ class QFormerAlignmentDataset(RecBaseDataset):
     def __len__(self) -> int:
         return len(self.users)
 
+    def _np_choice(self, pool, size: int, replace: bool):
+        if size <= 0:
+            return np.array([], dtype=np.int64)
+        return self._np_rng.choice(pool, size=size, replace=replace)
+
     def _sample_fixed(self, user: int, pos_indices):
-        pos_row = self.annotation.iloc[random.choice(pos_indices)]
+        pos_row = self.annotation.iloc[self._py_rng.choice(pos_indices)]
         pos_item = int(pos_row["iid"])
         history_set = set(pos_row["his"]) if "his" in pos_row else set()
         banned_items = history_set | {pos_item}
@@ -86,56 +102,65 @@ class QFormerAlignmentDataset(RecBaseDataset):
             raise ValueError(f"No negatives available for user {user}.")
 
         replace_flag = len(candidate_pool) < self.neg_k
-        neg_items = np.random.choice(candidate_pool, size=self.neg_k, replace=replace_flag)
-        instruction = random.choice(TEMPL_FIXED)
+        neg_items = self._np_choice(candidate_pool, size=self.neg_k, replace=replace_flag)
+        instruction = self._py_rng.choice(TEMPL_FIXED)
         item_text = f"Title: {pos_row['title']}"
         return pos_item, neg_items, instruction, item_text
 
     def _sample_genre(self, user: int, pos_indices):
-        pos_idx = random.choice(self.user_pos_indices_genre[user])
+        pos_idx = self._py_rng.choice(self.user_pos_indices_genre[user])
         seed_row = self.annotation.iloc[pos_idx]
         seed_item = int(seed_row["iid"])
-        genre = random.choice(list(self.item_genres[seed_item]))
+        genre = self._py_rng.choice(list(self.item_genres[seed_item]))
 
-        user_pos_in_genre = [idx for idx in self.user_pos_indices[user] if genre in self.item_genres.get(int(self.annotation.iloc[idx]["iid"]), set())]
+        user_pos_in_genre = [
+            idx
+            for idx in self.user_pos_indices[user]
+            if genre in self.item_genres.get(int(self.annotation.iloc[idx]["iid"]), set())
+        ]
         if not user_pos_in_genre:
             return None
 
-        chosen_idx = random.choice(user_pos_in_genre)
+        chosen_idx = self._py_rng.choice(user_pos_in_genre)
         pos_row = self.annotation.iloc[chosen_idx]
         pos_item = int(pos_row["iid"])
 
         history_set = set(pos_row["his"]) if "his" in pos_row else set()
         banned_items = history_set | {pos_item}
 
-        # hard negatives: liked items not in genre
-        hard_pool = [iid for iid in self.user_pos_items.get(user, set()) if genre not in self.item_genres.get(int(iid), set()) and iid != pos_item]
+        hard_pool = [
+            iid
+            for iid in self.user_pos_items.get(user, set())
+            if genre not in self.item_genres.get(int(iid), set()) and iid != pos_item
+        ]
         hard_sample = []
         if hard_pool:
             take = min(self.hard_k, len(hard_pool))
-            hard_sample = random.sample(hard_pool, k=take)
+            hard_sample = self._py_rng.sample(hard_pool, k=take)
 
         candidate_pool = list(self.all_items - banned_items)
         need_rand = max(self.neg_k - len(hard_sample), 0)
-        replace_flag = len(candidate_pool) < need_rand or need_rand == 0
+
         rand_sample = []
         if need_rand > 0:
-            rand_sample = list(np.random.choice(candidate_pool, size=need_rand, replace=replace_flag))
+            replace_flag = len(candidate_pool) < need_rand
+            rand_sample = list(self._np_choice(candidate_pool, size=need_rand, replace=replace_flag))
 
         neg_items = hard_sample + rand_sample
+
         if len(neg_items) < self.neg_k and candidate_pool:
-            extra = list(np.random.choice(candidate_pool, size=self.neg_k - len(neg_items), replace=True))
+            extra = list(self._np_choice(candidate_pool, size=self.neg_k - len(neg_items), replace=True))
             neg_items.extend(extra)
 
-        instruction = random.choice(TEMPL_GENRE).format(g=genre)
+        instruction = self._py_rng.choice(TEMPL_GENRE).format(g=genre)
         item_text = f"Title: {pos_row['title']}"
-        return pos_item, np.array(neg_items), instruction, item_text
+        return pos_item, np.array(neg_items, dtype=np.int64), instruction, item_text
 
     def __getitem__(self, index: int):
-        user = random.choice(self.users)
+        user = self._py_rng.choice(self.users)
         pos_indices = self.user_pos_indices[user]
 
-        use_fixed = (user not in self.user_pos_indices_genre) or (random.random() < self.p_fixed)
+        use_fixed = (user not in self.user_pos_indices_genre) or (self._py_rng.random() < self.p_fixed)
 
         if use_fixed:
             pos_item, neg_items, instruction, item_text = self._sample_fixed(user, pos_indices)
