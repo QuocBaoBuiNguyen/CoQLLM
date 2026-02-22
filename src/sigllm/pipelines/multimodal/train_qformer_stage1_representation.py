@@ -12,6 +12,8 @@ from sigllm.models.q_former.q_former import QFormer
 from sigllm.models.q_former.text_encoder import TextEncoder
 from sigllm.models.multimodal.qformer_alignment_model import QRecInstructAlignmentModel
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
     does not change anymore."""
