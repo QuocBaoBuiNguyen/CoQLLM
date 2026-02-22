@@ -12,19 +12,19 @@ from sigllm.datasets.base.rec_base_dataset_builder import RecBaseDatasetBuilder
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 
 
+TEMPL_FIXED = [
+    "Based on the interaction history, predict whether the user will like this movie. Answer Yes/No.",
+    "Predict if the user likes or dislikes this movie based on past behavior. Yes/No.",
+]
+
+TEMPL_GENRE = [
+    "Considering only the {g} genre, predict whether the user will like this movie. Answer Yes/No.",
+    "In the context of {g}, does the user like this movie? Yes/No.",
+]
+
 # @registry.register_builder("qformer_alignment")
 class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
     """Construct Q-Former alignment splits."""
-
-    TEMPL_FIXED = [
-        "Based on the interaction history, predict whether the user will like this movie. Answer Yes/No.",
-        "Predict if the user likes or dislikes this movie based on past behavior. Yes/No.",
-    ]
-
-    TEMPL_GENRE = [
-        "Considering only the {g} genre, predict whether the user will like this movie. Answer Yes/No.",
-        "In the context of {g}, does the user like this movie? Yes/No.",
-    ]
 
     train_dataset_cls = QFormerAlignmentDataset
 
