@@ -56,7 +56,7 @@ def _init_rec_model(cfg, device):
     return mf
 
 
-def _init_dataset(cfg):
+def _init_dataset(cfg, filename: str, shuffle: bool = True):
     """
     Initializes the dataset and dataloader.
     """
@@ -67,7 +67,7 @@ def _init_dataset(cfg):
     })
     dataset = QFormerAlignmentDataset(
         config=dataset_cfg,
-        filename="train_ood2.pkl",
+        filename=filename,
         neg_k=cfg.neg_k,
         hard_k=cfg.hard_k,
         p_fixed=cfg.p_fixed,
@@ -75,7 +75,7 @@ def _init_dataset(cfg):
     loader = DataLoader(
         dataset, 
         batch_size=cfg.batch_size, 
-        shuffle=True, 
+        shuffle=shuffle, 
         collate_fn=collate, 
         num_workers=cfg.num_workers
     )
@@ -146,12 +146,45 @@ def train_step(batch, model: QRecInstructAlignmentModel, w_ui: float = 1.0, w_it
     return loss, {"L_ui": L_ui, "L_it": L_it}
 
 
+
+def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5):
+    """
+    Evaluates the model on a given dataloader.
+    Returns average loss, L_ui, and L_it.
+    """
+    model.eval()
+    device = next(model.parameters()).device
+    total_loss = 0.0
+    total_lui = 0.0
+    total_lit = 0.0
+    steps = 0
+
+    with torch.no_grad():
+        for batch in loader:
+            batch["u"] = batch["u"].to(device)
+            batch["i_pos"] = batch["i_pos"].to(device)
+            batch["i_negs"] = batch["i_negs"].to(device)
+            
+            loss, logs = train_step(batch, model, w_ui=w_ui, w_it=w_it)
+            
+            total_loss += loss.item()
+            total_lui += logs["L_ui"].item()
+            total_lit += logs["L_it"].item()
+            steps += 1
+
+    if steps == 0:
+        return 0, 0, 0
+    return total_loss / steps, total_lui / steps, total_lit / steps
+
+
 def train_qformer_stage1_representation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    loader = _init_dataset(cfg)
-
+    train_loader = _init_dataset(cfg, filename="train_ood2.pkl", shuffle=True)
+    val_loader = _init_dataset(cfg, filename="val_ood2.pkl", shuffle=False)
+    test_loader = _init_dataset(cfg, filename="test_ood2.pkl", shuffle=False)
+    
     mf = _init_rec_model(cfg, device)
     text_encoder, d_model = _init_text_encoder(cfg, device)
     qformer = _init_qformer(cfg, d_model, device)
@@ -161,7 +194,9 @@ def train_qformer_stage1_representation(cfg):
 
     for epoch in range(cfg.epoch):
         model.train()
-        for batch in loader:
+        train_loss = 0
+        train_steps = 0
+        for batch in train_loader:
             batch["u"] = batch["u"].to(device)
             batch["i_pos"] = batch["i_pos"].to(device)
             batch["i_negs"] = batch["i_negs"].to(device)
@@ -170,13 +205,25 @@ def train_qformer_stage1_representation(cfg):
             loss.backward()
             opt.step()
             opt.zero_grad()
+            
+            train_loss += loss.item()
+            train_steps += 1    
 
         if (epoch + 1) % cfg.log_epoch == 0:
-            print(f"epoch {epoch+1} loss={loss.item():.4f} L_ui={logs['L_ui'].item():.4f} L_it={logs['L_it'].item():.4f}")
+            avg_train_loss = train_loss / train_steps if train_steps > 0 else 0
+            val_loss, val_lui, val_lit = evaluate_loss(model, val_loader, w_ui=cfg.w_ui, w_it=cfg.w_it)
+            print(f"epoch {epoch+1} | Train Loss={avg_train_loss:.4f} | Val Loss={val_loss:.4f} L_ui={val_lui:.4f} L_it={val_lit:.4f}")
 
-    outdir = "/content/SigLLM/ckpt/mf/mf_model.pth"
+    # Final Test
+    print("Evaluating on Test Set...")
+    test_loss, test_lui, test_lit = evaluate_loss(model, test_loader, w_ui=cfg.w_ui, w_it=cfg.w_it)
+    print(f"Test Results: Loss={test_loss:.4f} L_ui={test_lui:.4f} L_it={test_lit:.4f}")
+
+    outdir = cfg.get("output_dir", "/content/SigLLM/ckpt/qformer_stage1/")
     os.makedirs(outdir, exist_ok=True)
     torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1.pth"))
+    
+    return model
 
 
 def main():
