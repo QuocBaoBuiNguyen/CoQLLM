@@ -197,7 +197,7 @@ def main():
         "w_ui": 1.0,
         "w_it": 0.5,
         "log_epoch": 1,
-        "epoch": 10,
+        "epoch": 100,
         "text_model_name": "bert-base-uncased",
         "text_d_model": 768,
         "pretrained_rec_path": "/content/SigLLM/ckpt/mf/mf_model.pth",
