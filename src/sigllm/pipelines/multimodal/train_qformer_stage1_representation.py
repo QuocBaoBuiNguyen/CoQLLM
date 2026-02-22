@@ -6,6 +6,7 @@ from pathlib import Path
 import omegaconf
 import os
 
+from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 from sigllm.models.q_former.q_former import QFormer
@@ -67,13 +68,7 @@ def _init_dataset(cfg, filename: str, shuffle: bool = True):
             "storage": Path(cfg.data_dir)
         }
     })
-    dataset = QFormerAlignmentDataset(
-        config=dataset_cfg,
-        filename=filename,
-        neg_k=cfg.neg_k,
-        hard_k=cfg.hard_k,
-        p_fixed=cfg.p_fixed,
-    )
+    dataset = QFormerAlignmentDataset(filename=filename)
     loader = DataLoader(
         dataset, 
         batch_size=cfg.batch_size, 
@@ -185,9 +180,9 @@ def train_qformer_stage1_representation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader = _init_dataset(cfg, filename="train_ood2.pkl", shuffle=True)
-    val_loader = _init_dataset(cfg, filename="valid_ood2.pkl", shuffle=False)
-    test_loader = _init_dataset(cfg, filename="test_ood2.pkl", shuffle=False)
+    train_loader = _init_dataset(cfg, filename=cfg.data_dir + "train_qformer_ood2.pkl", shuffle=True)
+    val_loader = _init_dataset(cfg, filename=cfg.data_dir + "valid_qformer_ood2.pkl", shuffle=False)
+    test_loader = _init_dataset(cfg, filename=cfg.data_dir + "test_qformer_ood2.pkl", shuffle=False)
     
     mf = _init_rec_model(cfg, device)
     text_encoder, d_model = _init_text_encoder(cfg, device)
@@ -257,6 +252,19 @@ def main():
     }
 
     cfg = omegaconf.OmegaConf.create(train_cfg_dict)
+
+    QFormerAlignmentBuilder.build_qformer_alignment_samples(        
+        input_pkl_path=cfg.data_dir + "train_ood2.pkl",
+        output_path=cfg.data_dir + "train_qformer_ood2.pkl"
+    )
+    QFormerAlignmentBuilder.build_qformer_alignment_samples(        
+        input_pkl_path=cfg.data_dir + "valid_ood2.pkl",
+        output_path=cfg.data_dir + "valid_qformer_ood2.pkl"
+    )
+    QFormerAlignmentBuilder.build_qformer_alignment_samples(        
+        input_pkl_path=cfg.data_dir + "test_ood2.pkl",
+        output_path=cfg.data_dir + "test_qformer_ood2.pkl"
+    )
 
     train_qformer_stage1_representation(cfg)
 
