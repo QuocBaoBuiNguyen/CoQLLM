@@ -11,7 +11,7 @@ class QRecInstructAlignmentModel(nn.Module):
         self.qformer = qformer
         self.text_encoder = text_encoder
 
-        d = text_encoder.emb.embedding_dim # Assuming d_model is available
+        d = text_encoder.model.config.hidden_size
         self.p_user = nn.Linear(d, d)
         self.p_item = nn.Linear(d, d)
         self.p_text = nn.Linear(d, d)
