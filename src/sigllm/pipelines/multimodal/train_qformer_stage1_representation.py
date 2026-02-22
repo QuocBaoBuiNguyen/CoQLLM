@@ -182,7 +182,7 @@ def train_qformer_stage1_representation(cfg):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader = _init_dataset(cfg, filename="train_ood2.pkl", shuffle=True)
-    val_loader = _init_dataset(cfg, filename="val_ood2.pkl", shuffle=False)
+    val_loader = _init_dataset(cfg, filename="valid_ood2.pkl", shuffle=False)
     test_loader = _init_dataset(cfg, filename="test_ood2.pkl", shuffle=False)
     
     mf = _init_rec_model(cfg, device)
