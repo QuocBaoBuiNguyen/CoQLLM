@@ -3,12 +3,20 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from pathlib import Path
+import omegaconf
+import os
 from transformers import LlamaTokenizer, LlamaForCausalLM
 
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 from sigllm.models.q_former.q_former import QFormer
 from sigllm.models.multimodal.qformer_alignment_model import QRecInstructAlignmentModel
+
+
+def disabled_train(self, mode=True):
+    """Overwrite model.train with this function to make sure train/eval mode
+    does not change anymore."""
+    return self
 
 
 def collate(batch):
@@ -20,6 +28,95 @@ def collate(batch):
         else:
             out[k] = [b[k] for b in batch]
     return out
+
+
+def _init_rec_model(cfg, device):
+    """
+    Initializes the recommendation model, loads pretrained weights if available,
+    and freezes parameters if configured.
+    """
+    mf_config = omegaconf.OmegaConf.create({
+        "user_num": int(cfg.user_num),
+        "item_num": int(cfg.item_num),
+        "embedding_size": int(cfg.embedding_size)
+    })
+    mf = MatrixFactorization(mf_config).to(device)
+
+    pretrained_rec_path = cfg.get("pretrained_rec_path", "not_have")
+    if mf is not None and pretrained_rec_path != "not_have" and os.path.exists(pretrained_rec_path):
+        mf.load_state_dict(torch.load(pretrained_rec_path, map_location="cpu"))
+        print(f"Successfully loaded the pretrained rec model from {pretrained_rec_path}")
+
+    if cfg.get("freeze_rec", False) and mf is not None:
+        for param in mf.parameters():
+            param.requires_grad = False
+        mf.eval()
+        mf.train = disabled_train.__get__(mf, MatrixFactorization)
+        print("Freeze rec encoder completed")
+
+    return mf
+
+
+def _init_dataset(cfg):
+    """
+    Initializes the dataset and dataloader.
+    """
+    dataset_cfg = omegaconf.OmegaConf.create({
+        "build_info": {
+            "storage": Path(cfg.data_dir)
+        }
+    })
+    dataset = QFormerAlignmentDataset(
+        config=dataset_cfg,
+        filename="train_ood2.pkl",
+        neg_k=cfg.neg_k,
+        hard_k=cfg.hard_k,
+        p_fixed=cfg.p_fixed,
+    )
+    loader = DataLoader(
+        dataset, 
+        batch_size=cfg.batch_size, 
+        shuffle=True, 
+        collate_fn=collate, 
+        num_workers=cfg.num_workers
+    )
+    return loader
+
+
+def _init_llama(cfg):
+    """
+    Initializes the Llama tokenizer and model, then freezes its parameters.
+    """
+    llama_tokenizer = LlamaTokenizer.from_pretrained(cfg.llama_model, use_fast=False)
+    llama_tokenizer.pad_token = llama_tokenizer.eos_token
+    llama_model = LlamaForCausalLM.from_pretrained(cfg.llama_model)
+    
+    # Freeze Llama
+    for p in llama_model.parameters():
+        p.requires_grad = False
+    
+    return llama_tokenizer, llama_model
+
+
+def _init_qformer(cfg, llama_hidden, device):
+    """
+    Initializes the Q-Former model.
+    """
+    return QFormer(
+        d_cf=cfg.embedding_size, 
+        d_model=llama_hidden, 
+        num_queries=cfg.num_queries, 
+        num_heads=cfg.num_heads, 
+        num_layers=cfg.num_layers
+    ).to(device)
+
+
+def _init_optimizer(model, lr):
+    """
+    Initializes the Adam optimizer for trainable parameters.
+    """
+    return Adam([p for p in model.parameters() if p.requires_grad], lr=lr)
+
 
 def train_step(batch, model: QRecInstructAlignmentModel, w_ui: float = 1.0, w_it: float = 0.5):
     device = batch["u"].device
@@ -53,36 +150,18 @@ def train_qformer_stage1_representation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    storage = Path(cfg.data_dir)
-    dataset_cfg = type("Cfg", (), {})()
-    dataset_cfg.build_info = type("BI", (), {})()
-    dataset_cfg.build_info.storage = storage
+    # 1. Init Data
+    loader = _init_dataset(cfg)
 
-    dataset = QFormerAlignmentDataset(
-        config=dataset_cfg,
-        filename="train_ood2",
-        neg_k=cfg.neg_k,
-        hard_k=cfg.hard_k,
-        p_fixed=cfg.p_fixed,
-    )
-    loader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=True, collate_fn=collate, num_workers=cfg.num_workers)
-
-    mf_config = type("MF", (), {})()
-    mf_config.user_num = cfg.user_num
-    mf_config.item_num = cfg.item_num
-    mf_config.embedding_size = cfg.embedding_size
-    mf = MatrixFactorization(mf_config).to(device)
-
-    llama_tokenizer = LlamaTokenizer.from_pretrained(cfg.llama_model, use_fast=False)
-    llama_tokenizer.pad_token = llama_tokenizer.eos_token
-    llama_model = LlamaForCausalLM.from_pretrained(cfg.llama_model)
+    # 2. Init Models
+    mf = _init_rec_model(cfg, device)
+    llama_tokenizer, llama_model = _init_llama(cfg)
     llama_hidden = llama_model.config.hidden_size
+    qformer = _init_qformer(cfg, llama_hidden, device)
 
-    qformer = QFormer(d_cf=cfg.embedding_size, d_model=llama_hidden, num_queries=cfg.num_queries, num_heads=cfg.num_heads, num_layers=cfg.num_layers).to(device)
-
+    # 3. Assemble and build Optimizer
     model = QRecInstructAlignmentModel(mf, qformer, llama_tokenizer, llama_model).to(device)
-
-    opt = Adam([p for p in model.parameters() if p.requires_grad], lr=cfg.lr)
+    opt = _init_optimizer(model, cfg.lr)
 
     for epoch in range(cfg.epoch):
         model.train()
@@ -103,7 +182,7 @@ def train_qformer_stage1_representation(cfg):
 
 
 def main():
-    train_cfg = {
+    train_cfg_dict = {
         "data_dir": "/content/SigLLM/data/processed/ml-1m/",
         "batch_size": 256,
         "num_workers": 4,
@@ -122,9 +201,11 @@ def main():
         "log_epoch": 1,
         "epoch": 10,
         "llama_model": "/content/open_llama_3b",
+        "pretrained_rec_path": "not_have",
+        "freeze_rec": False,
     }
 
-    cfg = type("Cfg", (), train_cfg)()
+    cfg = omegaconf.OmegaConf.create(train_cfg_dict)
 
     train_qformer_stage1_representation(cfg)
 
