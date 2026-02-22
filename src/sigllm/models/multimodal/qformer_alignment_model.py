@@ -5,45 +5,26 @@ import torch.nn.functional as F
 class QRecInstructAlignmentModel(nn.Module):
     """Instruction-conditioned alignment with injected encoders."""
 
-    def __init__(self, mf, qformer, llama_tokenizer, llama_model) -> None:
+    def __init__(self, mf, qformer, text_encoder) -> None:
         super().__init__()
         self.mf = mf
         self.qformer = qformer
-        self.tok = llama_tokenizer
-        self.llama = llama_model
+        self.text_encoder = text_encoder
 
-        d = llama_model.config.hidden_size
+        d = text_encoder.emb.embedding_dim # Assuming d_model is available
         self.p_user = nn.Linear(d, d)
         self.p_item = nn.Linear(d, d)
         self.p_text = nn.Linear(d, d)
 
-        for p in self.llama.parameters():
-            p.requires_grad = False
-
     def pool_queries(self, q_tokens: torch.Tensor) -> torch.Tensor:
         return q_tokens.mean(dim=1)
 
-    def llama_embed_tokens_and_pool(self, tok, llama, text_list, device, max_len: int):
-        tokens = tok(
-            text_list,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=max_len,
-        ).to(device)
-        embeds = llama.get_input_embeddings()(tokens.input_ids)
-        mask = tokens.attention_mask.unsqueeze(-1)
-        summed = (embeds * mask).sum(dim=1)
-        denom = mask.sum(dim=1).clamp(min=1)
-        pooled = summed / denom
-        return embeds, pooled
-
     def ins_tokens(self, ins_list, device):
-        ins_tok_emb, _ = self.llama_embed_tokens_and_pool(self.tok, self.llama, ins_list, device, max_len=48)
-        return ins_tok_emb
+        h, pooled = self.text_encoder(ins_list, device, max_len=48)
+        return h
 
     def text_vec(self, text_list, device):
-        _, pooled = self.llama_embed_tokens_and_pool(self.tok, self.llama, text_list, device, max_len=64)
+        _, pooled = self.text_encoder(text_list, device, max_len=64)
         return self.p_text(pooled)
 
     def enc_user(self, u_ids, ins_tok_emb):

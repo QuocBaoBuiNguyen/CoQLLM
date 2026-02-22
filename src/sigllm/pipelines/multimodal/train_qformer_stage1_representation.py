@@ -5,13 +5,12 @@ from torch.optim import Adam
 from pathlib import Path
 import omegaconf
 import os
-from transformers import LlamaTokenizer, LlamaForCausalLM
 
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 from sigllm.models.q_former.q_former import QFormer
+from sigllm.models.q_former.text_encoder import TextEncoder
 from sigllm.models.multimodal.qformer_alignment_model import QRecInstructAlignmentModel
-
 
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
@@ -83,28 +82,29 @@ def _init_dataset(cfg):
     return loader
 
 
-def _init_llama(cfg):
+def _init_text_encoder(cfg, device):
     """
-    Initializes the Llama tokenizer and model, then freezes its parameters.
+    Initializes the TextEncoder.
     """
-    llama_tokenizer = LlamaTokenizer.from_pretrained(cfg.llama_model, use_fast=False)
-    llama_tokenizer.pad_token = llama_tokenizer.eos_token
-    llama_model = LlamaForCausalLM.from_pretrained(cfg.llama_model)
+    d_model = cfg.get("text_d_model", 768)
+    text_model_name = cfg.get("text_model_name", "bert-base-uncased")
+    text_encoder = TextEncoder(d_model=d_model, model_name=text_model_name).to(device)
     
-    # Freeze Llama
-    for p in llama_model.parameters():
-        p.requires_grad = False
-    
-    return llama_tokenizer, llama_model
+    # Freeze if necessary
+    if cfg.get("freeze_text_encoder", True):
+        for p in text_encoder.parameters():
+            p.requires_grad = False
+            
+    return text_encoder, d_model
 
 
-def _init_qformer(cfg, llama_hidden, device):
+def _init_qformer(cfg, d_model, device):
     """
     Initializes the Q-Former model.
     """
     return QFormer(
         d_cf=cfg.embedding_size, 
-        d_model=llama_hidden, 
+        d_model=d_model, 
         num_queries=cfg.num_queries, 
         num_heads=cfg.num_heads, 
         num_layers=cfg.num_layers
@@ -155,12 +155,12 @@ def train_qformer_stage1_representation(cfg):
 
     # 2. Init Models
     mf = _init_rec_model(cfg, device)
-    llama_tokenizer, llama_model = _init_llama(cfg)
-    llama_hidden = llama_model.config.hidden_size
-    qformer = _init_qformer(cfg, llama_hidden, device)
+    
+    text_encoder, d_model = _init_text_encoder(cfg, device)
+    qformer = _init_qformer(cfg, d_model, device)
 
     # 3. Assemble and build Optimizer
-    model = QRecInstructAlignmentModel(mf, qformer, llama_tokenizer, llama_model).to(device)
+    model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
     opt = _init_optimizer(model, cfg.lr)
 
     for epoch in range(cfg.epoch):
@@ -200,9 +200,11 @@ def main():
         "w_it": 0.5,
         "log_epoch": 1,
         "epoch": 10,
-        "llama_model": "/content/open_llama_3b",
+        "text_model_name": "bert-base-uncased",
+        "text_d_model": 768,
         "pretrained_rec_path": "not_have",
         "freeze_rec": False,
+        "freeze_text_encoder": True,
     }
 
     cfg = omegaconf.OmegaConf.create(train_cfg_dict)
