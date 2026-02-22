@@ -150,16 +150,12 @@ def train_qformer_stage1_representation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 1. Init Data
     loader = _init_dataset(cfg)
 
-    # 2. Init Models
     mf = _init_rec_model(cfg, device)
-    
     text_encoder, d_model = _init_text_encoder(cfg, device)
     qformer = _init_qformer(cfg, d_model, device)
 
-    # 3. Assemble and build Optimizer
     model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
     opt = _init_optimizer(model, cfg.lr)
 
@@ -178,7 +174,9 @@ def train_qformer_stage1_representation(cfg):
         if (epoch + 1) % cfg.log_epoch == 0:
             print(f"epoch {epoch+1} loss={loss.item():.4f} L_ui={logs['L_ui'].item():.4f} L_it={logs['L_it'].item():.4f}")
 
-    return model
+    outdir = "/content/SigLLM/ckpt/mf/mf_model.pth"
+    os.makedirs(outdir, exist_ok=True)
+    torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1.pth"))
 
 
 def main():
@@ -202,7 +200,7 @@ def main():
         "epoch": 10,
         "text_model_name": "bert-base-uncased",
         "text_d_model": 768,
-        "pretrained_rec_path": "/content/SigLLM/mf/mf_model.pth",
+        "pretrained_rec_path": "/content/SigLLM/ckpt/mf/mf_model.pth",
         "freeze_rec": True,
         "freeze_text_encoder": True,
     }
