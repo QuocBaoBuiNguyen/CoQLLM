@@ -88,16 +88,16 @@ def _init_text_encoder(cfg, device):
     """
     Initializes the TextEncoder.
     """
-    d_model = cfg.get("text_d_model", 768)
+    # d_model = cfg.get("text_d_model", 768)
     text_model_name = cfg.get("text_model_name", "bert-base-uncased")
-    text_encoder = TextEncoder(d_model=d_model, model_name=text_model_name).to(device)
+    text_encoder = TextEncoder(model_name=text_model_name).to(device)
     
     # Freeze if necessary
     if cfg.get("freeze_text_encoder", True):
         for p in text_encoder.parameters():
             p.requires_grad = False
             
-    return text_encoder, d_model
+    return text_encoder, text_encoder.model.config.hidden_size
 
 
 def _init_qformer(cfg, d_model, device):
