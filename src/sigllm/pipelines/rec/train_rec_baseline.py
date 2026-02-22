@@ -223,7 +223,7 @@ if __name__ == "__main__":
         'embedding_size': 256,
         "epoch": 5000,
         "eval_epoch":1,
-        "patience":50,
+        "patience":100,
         "batch_size":1024
     }
     save_file = "/content/SigLLM/mf/mf_model.pth"
