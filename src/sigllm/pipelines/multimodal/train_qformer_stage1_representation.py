@@ -121,6 +121,26 @@ def _init_optimizer(model, lr, weight_decay=0.0):
     )
 
 
+def _log_batch_preview(batch, prefix: str = "train_step", max_neg_preview: int = 5):
+    """Print a compact preview of the current batch for debugging."""
+    batch_size = batch["u"].size(0)
+    neg_count = batch["i_negs"].size(1) if batch["i_negs"].dim() > 1 else 0
+    first_negatives = batch["i_negs"][0, :max_neg_preview].tolist() if batch_size > 0 else []
+
+    print(
+        f"[{prefix}] batch_size={batch_size} neg_k={neg_count} "
+        f"u.shape={tuple(batch['u'].shape)} i_pos.shape={tuple(batch['i_pos'].shape)} "
+        f"i_negs.shape={tuple(batch['i_negs'].shape)}"
+    )
+    if batch_size > 0:
+        print(
+            f"[{prefix}] sample[0] u={batch['u'][0].item()} i_pos={batch['i_pos'][0].item()} "
+            f"i_negs[:{max_neg_preview}]={first_negatives}"
+        )
+        print(f"[{prefix}] sample[0] instruction={batch['instruction'][0]}")
+        print(f"[{prefix}] sample[0] item_text={batch['item_text'][0]}")
+
+
 def train_step(
     batch,
     model: QRecInstructAlignmentModel,
@@ -128,6 +148,7 @@ def train_step(
     w_it: float = 0.5,
     tau_ui: float = 0.07,
     tau_it: float = 0.2,
+    debug_batch: bool = False,
 ):
     device = batch["u"].device
     u = batch["u"]
@@ -135,6 +156,9 @@ def train_step(
     i_negs = batch["i_negs"]
     ins_list = batch["instruction"]
     itxt_list = batch["item_text"]
+
+    if debug_batch:
+        _log_batch_preview(batch)
 
     ins_tok_emb = model.ins_tokens(ins_list, device)
 
@@ -225,6 +249,7 @@ def train_qformer_stage1_representation(cfg):
                 w_it=cfg.w_it,
                 tau_ui=cfg.tau_ui,
                 tau_it=cfg.tau_it,
+                debug_batch=cfg.debug_batch and epoch == 0 and train_steps < cfg.debug_batch_max_steps,
             )
             loss.backward()
             opt.step()
@@ -288,6 +313,8 @@ def main():
         "tau_ui": 0.05,
         "tau_it": 0.10,
         "weight_decay": 1e-4,
+        "debug_batch": True,
+        "debug_batch_max_steps": 1,
         "log_epoch": 1,
         "epoch": 100,
         "text_model_name": "bert-base-uncased",
