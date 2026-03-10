@@ -110,14 +110,25 @@ def _init_qformer(cfg, d_model, device):
     ).to(device)
 
 
-def _init_optimizer(model, lr):
+def _init_optimizer(model, lr, weight_decay=0.0):
     """
     Initializes the Adam optimizer for trainable parameters.
     """
-    return Adam([p for p in model.parameters() if p.requires_grad], lr=lr)
+    return Adam(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=lr,
+        weight_decay=weight_decay,
+    )
 
 
-def train_step(batch, model: QRecInstructAlignmentModel, w_ui: float = 1.0, w_it: float = 0.5):
+def train_step(
+    batch,
+    model: QRecInstructAlignmentModel,
+    w_ui: float = 1.0,
+    w_it: float = 0.5,
+    tau_ui: float = 0.07,
+    tau_it: float = 0.2,
+):
     device = batch["u"].device
     u = batch["u"]
     i_pos = batch["i_pos"]
@@ -138,15 +149,15 @@ def train_step(batch, model: QRecInstructAlignmentModel, w_ui: float = 1.0, w_it
 
     t_vec = model.text_vec(itxt_list, device)
 
-    L_ui = model.loss_user_item(u_vec, i_pos_vec, i_neg_vecs)
-    L_it = model.loss_item_text(i_pos_vec, t_vec, 0.2)
+    L_ui = model.loss_user_item(u_vec, i_pos_vec, i_neg_vecs, tau=tau_ui)
+    L_it = model.loss_item_text(i_pos_vec, t_vec, tau=tau_it)
 
     loss = w_ui * L_ui + w_it * L_it
     return loss, {"L_ui": L_ui, "L_it": L_it}
 
 
 
-def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5):
+def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5, tau_ui=0.07, tau_it=0.2):
     """
     Evaluates the model on a given dataloader.
     Returns average loss, L_ui, and L_it.
@@ -164,7 +175,14 @@ def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5):
             batch["i_pos"] = batch["i_pos"].to(device)
             batch["i_negs"] = batch["i_negs"].to(device)
             
-            loss, logs = train_step(batch, model, w_ui=w_ui, w_it=w_it)
+            loss, logs = train_step(
+                batch,
+                model,
+                w_ui=w_ui,
+                w_it=w_it,
+                tau_ui=tau_ui,
+                tau_it=tau_it,
+            )
             
             total_loss += loss.item()
             total_lui += logs["L_ui"].item()
@@ -189,7 +207,7 @@ def train_qformer_stage1_representation(cfg):
     qformer = _init_qformer(cfg, d_model, device)
 
     model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
-    opt = _init_optimizer(model, cfg.lr)
+    opt = _init_optimizer(model, cfg.lr, weight_decay=cfg.weight_decay)
 
     for epoch in range(cfg.epoch):
         model.train()
@@ -200,7 +218,14 @@ def train_qformer_stage1_representation(cfg):
             batch["i_pos"] = batch["i_pos"].to(device)
             batch["i_negs"] = batch["i_negs"].to(device)
 
-            loss, logs = train_step(batch, model, w_ui=cfg.w_ui, w_it=cfg.w_it)
+            loss, logs = train_step(
+                batch,
+                model,
+                w_ui=cfg.w_ui,
+                w_it=cfg.w_it,
+                tau_ui=cfg.tau_ui,
+                tau_it=cfg.tau_it,
+            )
             loss.backward()
             opt.step()
             opt.zero_grad()
@@ -210,12 +235,30 @@ def train_qformer_stage1_representation(cfg):
 
         if (epoch + 1) % cfg.log_epoch == 0:
             avg_train_loss = train_loss / train_steps if train_steps > 0 else 0
-            val_loss, val_lui, val_lit = evaluate_loss(model, val_loader, w_ui=cfg.w_ui, w_it=cfg.w_it)
-            print(f"epoch {epoch+1} | Train Loss={avg_train_loss:.4f} | Val Loss={val_loss:.4f} L_ui={val_lui:.4f} L_it={val_lit:.4f}")
+            val_loss, val_lui, val_lit = evaluate_loss(
+                model,
+                val_loader,
+                w_ui=cfg.w_ui,
+                w_it=cfg.w_it,
+                tau_ui=cfg.tau_ui,
+                tau_it=cfg.tau_it,
+            )
+            print(
+                f"epoch {epoch+1} | Train Loss={avg_train_loss:.4f} | "
+                f"Val Loss={val_loss:.4f} L_ui={val_lui:.4f} L_it={val_lit:.4f} | "
+                f"w_it={cfg.w_it:.3f} tau_ui={cfg.tau_ui:.3f} tau_it={cfg.tau_it:.3f}"
+            )
 
     # Final Test
     print("Evaluating on Test Set...")
-    test_loss, test_lui, test_lit = evaluate_loss(model, test_loader, w_ui=cfg.w_ui, w_it=cfg.w_it)
+    test_loss, test_lui, test_lit = evaluate_loss(
+        model,
+        test_loader,
+        w_ui=cfg.w_ui,
+        w_it=cfg.w_it,
+        tau_ui=cfg.tau_ui,
+        tau_it=cfg.tau_it,
+    )
     print(f"Test Results: Loss={test_loss:.4f} L_ui={test_lui:.4f} L_it={test_lit:.4f}")
 
     outdir = cfg.get("output_dir", "/content/SigLLM/ckpt/qformer_stage1/")
@@ -241,7 +284,10 @@ def main():
         "p_fixed": 0.8,
         "lr": 1e-4,
         "w_ui": 1.0,
-        "w_it": 0.05,
+        "w_it": 0.10,
+        "tau_ui": 0.05,
+        "tau_it": 0.10,
+        "weight_decay": 1e-4,
         "log_epoch": 1,
         "epoch": 100,
         "text_model_name": "bert-base-uncased",
