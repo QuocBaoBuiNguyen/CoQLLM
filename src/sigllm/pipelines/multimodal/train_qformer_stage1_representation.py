@@ -141,6 +141,30 @@ def _log_batch_preview(batch, prefix: str = "train_step", max_neg_preview: int =
         print(f"[{prefix}] sample[0] item_text={batch['item_text'][0]}")
 
 
+def _compute_alignment_metrics(u_vec, i_pos_vec, i_neg_vecs, t_vec, tau_ui: float, tau_it: float):
+    """Compute Top-1 accuracy metrics for user-item and item-text alignment."""
+    u = QRecInstructAlignmentModel.l2norm(u_vec)
+    pos = QRecInstructAlignmentModel.l2norm(i_pos_vec)
+    neg = QRecInstructAlignmentModel.l2norm(i_neg_vecs)
+    text = QRecInstructAlignmentModel.l2norm(t_vec)
+
+    pos_logits = (u * pos).sum(-1, keepdim=True) / tau_ui
+    neg_logits = (u.unsqueeze(1) * neg).sum(-1) / tau_ui
+    ui_logits = torch.cat([pos_logits, neg_logits], dim=1)
+    ui_predictions = ui_logits.argmax(dim=1)
+    ui_top1 = (ui_predictions == 0).float().mean()
+
+    it_logits = (pos @ text.T) / tau_it
+    it_labels = torch.arange(pos.size(0), device=pos.device)
+    it_predictions = it_logits.argmax(dim=1)
+    it_top1 = (it_predictions == it_labels).float().mean()
+
+    return {
+        "ui_top1": ui_top1,
+        "it_top1": it_top1,
+    }
+
+
 def train_step(
     batch,
     model: QRecInstructAlignmentModel,
@@ -175,9 +199,10 @@ def train_step(
 
     L_ui = model.loss_user_item(u_vec, i_pos_vec, i_neg_vecs, tau=tau_ui)
     L_it = model.loss_item_text(i_pos_vec, t_vec, tau=tau_it)
+    metrics = _compute_alignment_metrics(u_vec, i_pos_vec, i_neg_vecs, t_vec, tau_ui, tau_it)
 
     loss = w_ui * L_ui + w_it * L_it
-    return loss, {"L_ui": L_ui, "L_it": L_it}
+    return loss, {"L_ui": L_ui, "L_it": L_it, **metrics}
 
 
 
@@ -191,6 +216,8 @@ def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5, tau_ui=0.07, tau_it=0.2):
     total_loss = 0.0
     total_lui = 0.0
     total_lit = 0.0
+    total_ui_top1 = 0.0
+    total_it_top1 = 0.0
     steps = 0
 
     with torch.no_grad():
@@ -211,14 +238,32 @@ def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5, tau_ui=0.07, tau_it=0.2):
             total_loss += loss.item()
             total_lui += logs["L_ui"].item()
             total_lit += logs["L_it"].item()
+            total_ui_top1 += logs["ui_top1"].item()
+            total_it_top1 += logs["it_top1"].item()
             steps += 1
 
     if steps == 0:
-        return 0, 0, 0
-    return total_loss / steps, total_lui / steps, total_lit / steps
+        return 0, 0, 0, 0, 0
+    return (
+        total_loss / steps,
+        total_lui / steps,
+        total_lit / steps,
+        total_ui_top1 / steps,
+        total_it_top1 / steps,
+    )
 
 
-def _save_checkpoint(checkpoint_path, model, optimizer, epoch, val_loss, val_lui, val_lit):
+def _save_checkpoint(
+    checkpoint_path,
+    model,
+    optimizer,
+    epoch,
+    val_loss,
+    val_lui,
+    val_lit,
+    val_ui_top1,
+    val_it_top1,
+):
     torch.save(
         {
             "epoch": epoch,
@@ -227,6 +272,8 @@ def _save_checkpoint(checkpoint_path, model, optimizer, epoch, val_loss, val_lui
             "val_loss": val_loss,
             "val_lui": val_lui,
             "val_lit": val_lit,
+            "val_ui_top1": val_ui_top1,
+            "val_it_top1": val_it_top1,
         },
         checkpoint_path,
     )
@@ -264,6 +311,10 @@ def train_qformer_stage1_representation(cfg):
     for epoch in range(cfg.epoch):
         model.train()
         train_loss = 0
+        train_lui = 0
+        train_lit = 0
+        train_ui_top1 = 0
+        train_it_top1 = 0
         train_steps = 0
         for batch in train_loader:
             batch["u"] = batch["u"].to(device)
@@ -284,11 +335,19 @@ def train_qformer_stage1_representation(cfg):
             opt.zero_grad()
             
             train_loss += loss.item()
+            train_lui += logs["L_ui"].item()
+            train_lit += logs["L_it"].item()
+            train_ui_top1 += logs["ui_top1"].item()
+            train_it_top1 += logs["it_top1"].item()
             train_steps += 1    
 
         if (epoch + 1) % cfg.log_epoch == 0:
             avg_train_loss = train_loss / train_steps if train_steps > 0 else 0
-            val_loss, val_lui, val_lit = evaluate_loss(
+            avg_train_lui = train_lui / train_steps if train_steps > 0 else 0
+            avg_train_lit = train_lit / train_steps if train_steps > 0 else 0
+            avg_train_ui_top1 = train_ui_top1 / train_steps if train_steps > 0 else 0
+            avg_train_it_top1 = train_it_top1 / train_steps if train_steps > 0 else 0
+            val_loss, val_lui, val_lit, val_ui_top1, val_it_top1 = evaluate_loss(
                 model,
                 val_loader,
                 w_ui=cfg.w_ui,
@@ -297,8 +356,11 @@ def train_qformer_stage1_representation(cfg):
                 tau_it=cfg.tau_it,
             )
             print(
-                f"epoch {epoch+1} | Train Loss={avg_train_loss:.4f} | "
-                f"Val Loss={val_loss:.4f} L_ui={val_lui:.4f} L_it={val_lit:.4f} | "
+                f"epoch {epoch+1} | "
+                f"Train Loss={avg_train_loss:.4f} L_ui={avg_train_lui:.4f} L_it={avg_train_lit:.4f} "
+                f"UI@1={avg_train_ui_top1:.4f} IT@1={avg_train_it_top1:.4f} | "
+                f"Val Loss={val_loss:.4f} L_ui={val_lui:.4f} L_it={val_lit:.4f} "
+                f"UI@1={val_ui_top1:.4f} IT@1={val_it_top1:.4f} | "
                 f"w_it={cfg.w_it:.3f} tau_ui={cfg.tau_ui:.3f} tau_it={cfg.tau_it:.3f}"
             )
 
@@ -314,6 +376,8 @@ def train_qformer_stage1_representation(cfg):
                     val_loss,
                     val_lui,
                     val_lit,
+                    val_ui_top1,
+                    val_it_top1,
                 )
                 print(f"Saved new best checkpoint at epoch {best_epoch} -> {best_checkpoint_path}")
             else:
@@ -334,12 +398,14 @@ def train_qformer_stage1_representation(cfg):
         best_checkpoint = _load_checkpoint(best_checkpoint_path, model)
         print(
             f"Loaded best checkpoint from epoch {best_checkpoint['epoch']} "
-            f"with Val Loss={best_checkpoint['val_loss']:.4f}"
+            f"with Val Loss={best_checkpoint['val_loss']:.4f} "
+            f"UI@1={best_checkpoint.get('val_ui_top1', 0.0):.4f} "
+            f"IT@1={best_checkpoint.get('val_it_top1', 0.0):.4f}"
         )
 
     # Final Test
     print("Evaluating on Test Set...")
-    test_loss, test_lui, test_lit = evaluate_loss(
+    test_loss, test_lui, test_lit, test_ui_top1, test_it_top1 = evaluate_loss(
         model,
         test_loader,
         w_ui=cfg.w_ui,
@@ -347,7 +413,10 @@ def train_qformer_stage1_representation(cfg):
         tau_ui=cfg.tau_ui,
         tau_it=cfg.tau_it,
     )
-    print(f"Test Results: Loss={test_loss:.4f} L_ui={test_lui:.4f} L_it={test_lit:.4f}")
+    print(
+        f"Test Results: Loss={test_loss:.4f} L_ui={test_lui:.4f} L_it={test_lit:.4f} "
+        f"UI@1={test_ui_top1:.4f} IT@1={test_it_top1:.4f}"
+    )
 
     torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1.pth"))
     if os.path.exists(best_checkpoint_path):
