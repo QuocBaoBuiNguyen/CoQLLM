@@ -139,7 +139,7 @@ def train_step(batch, model: QRecInstructAlignmentModel, w_ui: float = 1.0, w_it
     t_vec = model.text_vec(itxt_list, device)
 
     L_ui = model.loss_user_item(u_vec, i_pos_vec, i_neg_vecs)
-    L_it = model.loss_item_text(i_pos_vec, t_vec)
+    L_it = model.loss_item_text(i_pos_vec, t_vec, 0.2)
 
     loss = w_ui * L_ui + w_it * L_it
     return loss, {"L_ui": L_ui, "L_it": L_it}
@@ -241,7 +241,7 @@ def main():
         "p_fixed": 0.8,
         "lr": 1e-4,
         "w_ui": 1.0,
-        "w_it": 0.5,
+        "w_it": 0.05,
         "log_epoch": 1,
         "epoch": 100,
         "text_model_name": "bert-base-uncased",
