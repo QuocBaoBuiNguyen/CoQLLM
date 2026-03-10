@@ -218,6 +218,27 @@ def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5, tau_ui=0.07, tau_it=0.2):
     return total_loss / steps, total_lui / steps, total_lit / steps
 
 
+def _save_checkpoint(checkpoint_path, model, optimizer, epoch, val_loss, val_lui, val_lit):
+    torch.save(
+        {
+            "epoch": epoch,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "val_loss": val_loss,
+            "val_lui": val_lui,
+            "val_lit": val_lit,
+        },
+        checkpoint_path,
+    )
+
+def _load_checkpoint(checkpoint_path, model, optimizer=None):
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    model.load_state_dict(checkpoint["model"])
+    if optimizer is not None and "optimizer" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer"])
+    return checkpoint
+
+
 def train_qformer_stage1_representation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -232,6 +253,13 @@ def train_qformer_stage1_representation(cfg):
 
     model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
     opt = _init_optimizer(model, cfg.lr, weight_decay=cfg.weight_decay)
+
+    outdir = cfg.get("output_dir", "/content/SigLLM/ckpt/qformer_stage1/")
+    os.makedirs(outdir, exist_ok=True)
+    best_checkpoint_path = os.path.join(outdir, cfg.get("best_checkpoint_name", "best_qformer_stage1.pt"))
+    best_val_loss = float("inf")
+    best_epoch = -1
+    early_stop_counter = 0
 
     for epoch in range(cfg.epoch):
         model.train()
@@ -274,6 +302,41 @@ def train_qformer_stage1_representation(cfg):
                 f"w_it={cfg.w_it:.3f} tau_ui={cfg.tau_ui:.3f} tau_it={cfg.tau_it:.3f}"
             )
 
+            if val_loss < best_val_loss - cfg.early_stopping_min_delta:
+                best_val_loss = val_loss
+                best_epoch = epoch + 1
+                early_stop_counter = 0
+                _save_checkpoint(
+                    best_checkpoint_path,
+                    model,
+                    opt,
+                    epoch + 1,
+                    val_loss,
+                    val_lui,
+                    val_lit,
+                )
+                print(f"Saved new best checkpoint at epoch {best_epoch} -> {best_checkpoint_path}")
+            else:
+                early_stop_counter += 1
+                print(
+                    f"No val improvement for {early_stop_counter} epoch(s). "
+                    f"Best Val Loss={best_val_loss:.4f} at epoch {best_epoch}"
+                )
+
+            if early_stop_counter >= cfg.early_stopping_patience:
+                print(
+                    f"Early stopping triggered at epoch {epoch+1}. "
+                    f"Best epoch={best_epoch} Best Val Loss={best_val_loss:.4f}"
+                )
+                break
+
+    if os.path.exists(best_checkpoint_path):
+        best_checkpoint = _load_checkpoint(best_checkpoint_path, model)
+        print(
+            f"Loaded best checkpoint from epoch {best_checkpoint['epoch']} "
+            f"with Val Loss={best_checkpoint['val_loss']:.4f}"
+        )
+
     # Final Test
     print("Evaluating on Test Set...")
     test_loss, test_lui, test_lit = evaluate_loss(
@@ -286,9 +349,9 @@ def train_qformer_stage1_representation(cfg):
     )
     print(f"Test Results: Loss={test_loss:.4f} L_ui={test_lui:.4f} L_it={test_lit:.4f}")
 
-    outdir = cfg.get("output_dir", "/content/SigLLM/ckpt/qformer_stage1/")
-    os.makedirs(outdir, exist_ok=True)
     torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1.pth"))
+    if os.path.exists(best_checkpoint_path):
+        torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1_best.pth"))
     
     return model
 
@@ -315,6 +378,9 @@ def main():
         "weight_decay": 1e-4,
         "debug_batch": True,
         "debug_batch_max_steps": 1,
+        "early_stopping_patience": 10,
+        "early_stopping_min_delta": 1e-4,
+        "best_checkpoint_name": "best_qformer_stage1.pt",
         "log_epoch": 1,
         "epoch": 100,
         "text_model_name": "bert-base-uncased",
