@@ -11,7 +11,7 @@ from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDa
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 from sigllm.models.q_former.q_former import QFormer
 from sigllm.models.q_former.text_encoder import TextEncoder
-from sigllm.models.multimodal.qformer_alignment_model import QRecInstructAlignmentModel
+from sigllm.models.projection.qformer_alignment_model import QRecInstructAlignmentModel
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
