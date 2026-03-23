@@ -95,7 +95,9 @@ class QRecLLM(Rec2Base):
 
     def _init_llm_model(self, llama_model, low_resource, device_8bit):
         log_step(f"Loading LLAMA: {llama_model}")
-        self.llama_tokenizer = LlamaTokenizer.from_pretrained(llama_model, use_fast=False)
+        model_path = llama_model if llama_model else "./content/ckpt/llm/base"
+        
+        self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, use_fast=False)
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
         bnb_config = BitsAndBytesConfig(
@@ -106,7 +108,7 @@ class QRecLLM(Rec2Base):
         )
 
         self.llama_model = LlamaForCausalLM.from_pretrained(
-            llama_model,
+            model_path,
             quantization_config=bnb_config,
             device_map="auto",
             torch_dtype=torch.float16
