@@ -28,6 +28,14 @@ model:
     target_modules: ["q_proj", "v_proj"]
     dropout: 0.05
 
+  qformer_config:
+    use_qformer: True
+    qformer_ckpt: "/content/SigLLM/ckpt/qformer_stage1/qformer_stage1_best.pth" # Path from stage 1
+    qformer_d_model: 768
+    num_queries: 8
+    num_heads: 8
+    num_layers: 2
+
   rec_config:
     user_num: -100
     item_num: -100
