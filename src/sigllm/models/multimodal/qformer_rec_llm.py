@@ -13,6 +13,8 @@ import os
 from sigllm.common.logging_utils import NotebookLogger
 from sigllm.common.registry import registry
 from sigllm.models.multimodal.base.rec_base_model import Rec2Base
+from sigllm.models.q_former.q_former import QFormer
+from sigllm.models.q_former.text_encoder import TextEncoder
 
 LOGGER = NotebookLogger.rich_logger("sigllm.rec_base_model")
 
@@ -55,6 +57,9 @@ class QRecLLM(Rec2Base):
         device_8bit=0,  # the device of 8bit model should be set when loading and cannot be changed anymore.
         proj_token_num=1, # the number of tokens that the user/item embedding projected to
         proj_drop=0,
+        num_queries=8,
+        num_heads=8,
+        num_layers=2,
         lora_config=None,
         proj_mid=5,
         freeze_lora=False,
@@ -72,9 +77,25 @@ class QRecLLM(Rec2Base):
         # Initialize components
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model, low_resource, device_8bit)
-        # self._init_lora(lora_config, freeze_lora)
-        self._init_projection(rec_model, rec_config, proj_mid, proj_token_num, freeze_proj)
+        self.text_encoder, d_model = self._init_text_encoder(freeze_qformer=False)
+        self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, pretrained_qformer="/content/SigLLM/ckpt/qformer_stage1/qformer_stage1_best.pth", freeze_qformer=False)
+        self._init_projection(proj_mid, proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
+
+    def _init_text_encoder(self, freeze_qformer: bool):
+        """
+        Initializes the TextEncoder.
+        """
+        text_encoder = TextEncoder(model_name="bert-base-uncased")
+        
+        # Freeze if necessary
+        if freeze_qformer:
+            for p in text_encoder.parameters():
+                p.requires_grad = False
+            text_encoder.eval()
+            text_encoder.train = disabled_train.__get__(text_encoder, TextEncoder)
+
+        return text_encoder, text_encoder.model.config.hidden_size
 
     def _init_rec_model(self, rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec):
         log_step("Loading Rec_model")
@@ -118,50 +139,117 @@ class QRecLLM(Rec2Base):
             param.requires_grad = False
         log_step("Loading LLAMA Done")
 
-    def _init_lora(self, lora_config, freeze_lora):
-        self.use_lora = False
-        if lora_config is not None and lora_config.use_lora:
-            log_step("Setting Lora")
-            self.use_lora = True
-            peft_config = LoraConfig(
-                r=lora_config.r,
-                lora_alpha=lora_config.alpha,
-                target_modules=lora_config.target_modules,
-                lora_dropout=lora_config.dropout,
-                bias="none",
-                task_type="CAUSAL_LM"
-            ) 
-            self.llama_model_lora = get_peft_model(self.llama_model, peft_config)
-            log_step("Setting Lora Done")
+    # def _init_lora(self, lora_config, freeze_lora):
+    #     self.use_lora = False
+    #     if lora_config is not None and lora_config.use_lora:
+    #         log_step("Setting Lora")
+    #         self.use_lora = True
+    #         peft_config = LoraConfig(
+    #             r=lora_config.r,
+    #             lora_alpha=lora_config.alpha,
+    #             target_modules=lora_config.target_modules,
+    #             lora_dropout=lora_config.dropout,
+    #             bias="none",
+    #             task_type="CAUSAL_LM"
+    #         ) 
+    #         self.llama_model_lora = get_peft_model(self.llama_model, peft_config)
+    #         log_step("Setting Lora Done")
         
-        if freeze_lora and hasattr(self, 'llama_model_lora'):
-            log_step("Freeze Lora...")
-            for name, param in self.llama_model_lora.named_parameters():
-                param.requires_grad = False
+    #     if freeze_lora and hasattr(self, 'llama_model_lora'):
+    #         log_step("Freeze Lora...")
+    #         for name, param in self.llama_model_lora.named_parameters():
+    #             param.requires_grad = False
 
-    def _init_projection(self, rec_model, rec_config, proj_mid, proj_token_num, freeze_proj):
-        if self.rec_encoder is not None and 'prompt' not in rec_model:
-            log_step("Initializing projection layer", f"mid={proj_mid}")
-            self.llama_proj = nn.Sequential(
-                nn.Linear(self.rec_encoder.config.embedding_size, self.rec_encoder.config.embedding_size*int(proj_mid)),
-                nn.ReLU(),
-                nn.Linear(self.rec_encoder.config.embedding_size*int(proj_mid), self.llama_model.config.hidden_size * proj_token_num),
-            )
-        elif self.rec_encoder is not None and rec_model == "personlized_prompt":
-            log_step("Personalized prompt learning")
-            self.llama_proj = nn.Linear(rec_config.item_num + rec_config.user_num, self.llama_model.config.hidden_size * proj_token_num, bias=False)
-        elif self.rec_encoder is not None and rec_model == "soft_prompt":
-            log_step("Soft prompt learning")
-            self.llama_proj = nn.Linear(2, self.llama_model.config.hidden_size * proj_token_num, bias=False)
+    def _init_qformer(self, d_cf, d_model, num_queries, num_heads, num_layers,
+                    pretrained_qformer: str, freeze_qformer: bool):
+        log_step("Loading QFormer")
+
+        # 1) init qformer kiến trúc giống stage1
+        self.qformer = QFormer(
+            d_cf=d_cf,
+            d_model=d_model,
+            num_queries=num_queries,
+            num_heads=num_heads,
+            num_layers=num_layers
+        ).to(self.device)
+
+        # 2) load checkpoint stage1
+        if pretrained_qformer and pretrained_qformer != "not_have":
+            ckpt = torch.load(pretrained_qformer, map_location="cpu")
+
+            # nếu bạn save thẳng state_dict: ckpt là dict param
+            state_dict = ckpt
+
+            # nếu ckpt có prefix "qformer." (trường hợp save full model)
+            if isinstance(state_dict, dict) and any(k.startswith("qformer.") for k in state_dict.keys()):
+                state_dict = {k.replace("qformer.", "", 1): v for k, v in state_dict.items()}
+
+            self.qformer.load_state_dict(state_dict, strict=True)
+            log_step("Successfully loaded QFormer checkpoint", pretrained_qformer)
+
+        # 3) freeze / train tiếp
+        if freeze_qformer:
+            for p in self.qformer.parameters():
+                p.requires_grad = False
+            self.qformer.eval()
+            self.qformer.train = disabled_train
+            log_step("Freeze QFormer")
         else:
-            self.llama_proj = None
-        
-        if freeze_proj and self.llama_proj is not None:
-            for name, param in self.llama_proj.named_parameters():
-                param.requires_grad = False
-            self.llama_proj = self.llama_proj.eval()
+            for p in self.qformer.parameters():
+                p.requires_grad = True
+            self.qformer.train()
+            log_step("Train QFormer in stage2")
+
+        log_step("Loading QFormer Done")
+        return self.qformer
+
+    def _init_projection(self, proj_mid, proj_token_num, freeze_proj):
+        """
+        Stage 2 projection: map Q-Former output tokens -> LLM hidden tokens.
+        Input  : qformer_out [B, Q, d_q]
+        Output : llm_tokens  [B, Q, H]
+        """
+        log_step("Loading Projection (QFormer -> LLM)")
+
+        if self.qformer is None:
+            raise ValueError("qformer is None. Please init/load Q-Former before init projection.")
+        if not hasattr(self.qformer, "proj_cf") or not isinstance(self.qformer.proj_cf, nn.Linear):
+            raise ValueError("qformer.proj_cf (nn.Linear) is required to infer d_q.")
+        if not hasattr(self.qformer, "q"):
+            raise ValueError("qformer.q (learned query tokens) is required to infer num_queries.")
+        if self.llama_model is None:
+            raise ValueError("llama_model is None. Please init LLM backbone before init projection.")
+
+        d_q = self.qformer.proj_cf.out_features
+        Q = int(self.qformer.q.shape[0])
+        H = int(self.llama_model.config.hidden_size)
+
+        # luôn sync theo Q-Former để tránh lệch số <unk> khi inject
+        self.proj_token_num = Q
+        if proj_token_num is not None and int(proj_token_num) != Q:
+            log_step("WARNING",
+                    f"proj_token_num({proj_token_num}) != qformer.num_queries({Q}). "
+                    f"Using Q={Q} to keep injection consistent.")
+
+        mid = int(proj_mid) if proj_mid is not None else 4
+
+        # per-token projection: [B,Q,d_q] -> [B,Q,H]
+        self.llama_proj = nn.Sequential(
+            nn.LayerNorm(d_q),
+            nn.Linear(d_q, d_q * mid),
+            nn.GELU(),
+            nn.Linear(d_q * mid, H),
+        )
+
+        if freeze_proj:
+            for p in self.llama_proj.parameters():
+                p.requires_grad = False
+            self.llama_proj.eval()
             self.llama_proj.train = disabled_train
             log_step("Freeze llama_proj")
+
+        log_step("Loading Projection Done",
+                f"d_q={d_q}, H={H}, Q={self.proj_token_num}, mid={mid}")
 
     def _init_prompts(self, prompt_path, prompt_template, max_txt_len, end_sym):
         self.max_txt_len = max_txt_len
@@ -252,31 +340,33 @@ class QRecLLM(Rec2Base):
             return None, None
 
         device = batch_data["UserID"].device
-        if self.low_resource:
-            self.rec_to_cpu()
-            for k in batch_data:
-                batch_data[k] = batch_data[k].to("cpu")
+        B = batch_data["UserID"].shape[0]
+        Q = self.proj_token_num
+        H = self.llama_model.config.hidden_size
+
+        # 0) instruction tokens (stage2 MVP: fixed instruction)
+        # (Nếu batch_data có instruction thì dùng batch_data["instruction"])
+        ins_list = batch_data.get(
+            "instruction",
+            ["Dựa trên lịch sử tương tác, dự đoán người dùng có thích bộ phim này không. Yes/No."] * B
+        )
+        ins_tok_emb, _ = self.text_encoder(ins_list, device, max_len=48)  # h:[B,L,d_model], pooled:[B,d_model]
+        # NOTE: assume TextEncoder returns (h, pooled) like stage1
 
         with self.maybe_autocast():
-            B = batch_data["UserID"].shape[0]
-            H = self.llama_model.config.hidden_size
-
             all_user_embeds, all_item_embeds = self.rec_encoder.compute()
 
-            # --- user embedding ---
-            if self.rec_model_type == "sasrec":
-                raise NotImplementedError("sasrec is not implemented in this version")
-            elif self.rec_model_type in ("DCN", "DIN"):
-                raise NotImplementedError("DCN and DIN are not implemented in this version")
-            else:
-                user_embeds = self.rec_encoder.user_encoder(batch_data["UserID"], all_users=all_user_embeds).unsqueeze(-2)
+            # 1) CF vectors
+            user_cf = self.rec_encoder.user_encoder(batch_data["UserID"], all_users=all_user_embeds)          # [B,d_cf]
+            target_cf = self.rec_encoder.item_encoder(batch_data["TargetItemID"], all_items=all_item_embeds)  # [B,d_cf]
 
-            # --- target item embedding ---
-            target_item_embeds = self.rec_encoder.item_encoder(batch_data["TargetItemID"], all_items=all_item_embeds).unsqueeze(-2)
+            # 2) QFormer outputs (instruction-conditioned)
+            user_q = self.qformer(user_cf, ins_tok_emb)        # [B,Q,d_model]
+            target_q = self.qformer(target_cf, ins_tok_emb)    # [B,Q,d_model]
 
-            # --- project to space llama ---
-            user_llama = self.llama_proj(user_embeds).reshape(B, -1, self.proj_token_num, H)
-            target_llama = self.llama_proj(target_item_embeds).reshape(B, -1, self.proj_token_num, H)
+            # 3) Project to LLM hidden per token
+            user_llama = self.llama_proj(user_q)               # [B,Q,H]
+            target_llama = self.llama_proj(target_q)           # [B,Q,H]
 
             interacted_llama_flat = None
             merged_flat = None
@@ -285,58 +375,48 @@ class QRecLLM(Rec2Base):
             need_merge = has_interacted and feature_order is not None and len(feature_order) == 3
 
             if need_merge:
-                interacted = self.rec_encoder.item_encoder(batch_data["InteractedItemIDs_pad"], all_items=all_item_embeds)
-                interacted_llama = self.llama_proj(interacted).reshape(B, -1, self.proj_token_num, H)
-                
-                # internal mapping for embeddings and masks
+                ids = batch_data["InteractedItemIDs_pad"]  # [B,L]
+                L = ids.shape[1]
+
+                inter_cf = self.rec_encoder.item_encoder(ids, all_items=all_item_embeds)  # [B,L,d_cf]
+                inter_cf_flat = inter_cf.reshape(B * L, -1)                               # [B*L,d_cf]
+                ins_rep = ins_tok_emb.repeat_interleave(L, dim=0)                         # [B*L,L_ins,d_model]
+
+                inter_q_flat = self.qformer(inter_cf_flat, ins_rep)                       # [B*L,Q,d_model]
+                inter_llama_flat2 = self.llama_proj(inter_q_flat)                         # [B*L,Q,H]
+                inter_llama = inter_llama_flat2.reshape(B, L, Q, H)                       # [B,L,Q,H]
+                interacted_llama_flat = inter_llama.reshape(B, L * Q, H)                  # [B,L*Q,H]
+
+                # mask expand theo Q
+                item_mask = (ids != self.rec_encoder.padding_index).long()                # [B,L]
+                item_mask_q = item_mask.unsqueeze(-1).repeat(1, 1, Q).reshape(B, L * Q)   # [B,L*Q]
+                ones_q = torch.ones((B, Q), device=device, dtype=item_mask.dtype)         # [B,Q]
+
                 ph2emb = {
-                    "<UserID>": user_llama,
-                    "<ItemIDList>": interacted_llama,
-                    "<TargetItemID>": target_llama
+                    "<UserID>": user_llama,                 # [B,Q,H]
+                    "<ItemIDList>": interacted_llama_flat,  # [B,L*Q,H]
+                    "<TargetItemID>": target_llama          # [B,Q,H]
                 }
-
-                # Create historical item mask (0 for padding, 1 for real items)
-                item_mask = torch.ones_like(batch_data['InteractedItemIDs_pad'])
-                item_mask = torch.where(batch_data['InteractedItemIDs_pad'] == self.rec_encoder.padding_index, 0, item_mask)
-
                 ph2mask = {
-                    "<UserID>": torch.ones([B, 1], device=item_mask.device, dtype=item_mask.dtype),
-                    "<ItemIDList>": item_mask,
-                    "<TargetItemID>": torch.ones([B, 1], device=item_mask.device, dtype=item_mask.dtype)
+                    "<UserID>": ones_q,
+                    "<ItemIDList>": item_mask_q,
+                    "<TargetItemID>": ones_q
                 }
 
-                # 3. Concatenate tensors based on the feature_order
-                # Concat on the sequence dimension (dim 1)
-                merged_embeds = torch.cat([ph2emb[ph] for ph in feature_order], dim=1) 
-                
-                # Concat masks to identify non-padded positions
-                full_mask = torch.cat([ph2mask[ph] for ph in feature_order], dim=1).to(device)
-                
-                # 4. Extract valid embeddings using the mask
-                idx_nopad = torch.nonzero(full_mask) # Get (N, 2) indices
-                
-                # Index into 4D tensor and flatten to (Total_Valid_Tokens, H)
-                # Results in shape: (Total_Items * proj_token_num, H)
-                merged_flat = merged_embeds[idx_nopad[:, 0], idx_nopad[:, 1]].reshape(-1, H)
+                merged_embeds = torch.cat([ph2emb[ph] for ph in feature_order], dim=1)    # [B, Q + L*Q + Q, H]
+                full_mask = torch.cat([ph2mask[ph] for ph in feature_order], dim=1)      # [B, Q + L*Q + Q]
 
-                # Prepare separate flattened versions for output dictionary
-                interacted_llama_flat = interacted_llama.reshape(B, -1, H)
+                idx = torch.nonzero(full_mask, as_tuple=False)                            # [N,2]
+                merged_flat = merged_embeds[idx[:, 0], idx[:, 1]]                         # [N,H]
 
-            # --- Final output dictionary ---
             rec_embeds = {
-                "User_emb": user_llama.reshape(B, -1, H),
-                "TargetItem_emb": target_llama.reshape(B, -1, H),
-                "InteractedItems_embs": interacted_llama_flat,
-                "merged_embs": merged_flat,
+                "User_emb": user_llama,                 # [B,Q,H]
+                "TargetItem_emb": target_llama,         # [B,Q,H]
+                "InteractedItems_embs": interacted_llama_flat,  # [B,L*Q,H] or None
+                "merged_embs": merged_flat,             # [N,H] or None
             }
 
-        rec_atts = None
-        # {
-        #     'user': atts_user,
-        #     'TargetItem': atts_targetItem,
-        #     'InteractedItems': atts_interactedItem
-        # }
-        return rec_embeds, rec_atts
+        return rec_embeds, None
 
     def wrap_prompt_with_soft_tokens_v2(self, rec_embeds, rec_atts, batch_data, prompt_template):
         if not prompt_template:
@@ -347,7 +427,7 @@ class QRecLLM(Rec2Base):
         bos = self.llama_tokenizer.bos_token if self.llama_tokenizer.bos_token else "<s>"
         
         unk_token = self.llama_tokenizer.unk_token
-        unk_seq = "".join([unk_token] * self.proj_token_num) 
+        unk_seq = " ".join([unk_token] * self.proj_token_num) 
         
         prompt_template = bos + prompt_template 
         prompt_template = prompt_template.replace("<UserID>", unk_seq)
@@ -360,7 +440,7 @@ class QRecLLM(Rec2Base):
             
             if 'InteractedItemIDs_pad' in batch_data:
                 valid_items = (batch_data['InteractedItemIDs_pad'][k] != self.rec_encoder.padding_index).sum().item()
-                item_list_placeholder = "".join([unk_seq] * valid_items)
+                item_list_placeholder = " ".join([unk_seq] * valid_items)
                 current_prompt = current_prompt.replace('<ItemIDList>', item_list_placeholder)
 
             if "<ItemTitleList>" in current_prompt and 'InteractedItemTitles' in batch_data:
