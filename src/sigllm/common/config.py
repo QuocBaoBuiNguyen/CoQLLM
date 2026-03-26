@@ -8,7 +8,7 @@ class Config:
         self.args = args
         registry.register("configuration", self)
 
-        cli_overrides = self._parse_cli_overrides(args.opts)
+        cli_overrides = self._parse_cli_overrides(args.options)
         main_cfg = OmegaConf.load(self.args.cfg_path)
 
         self.config = OmegaConf.merge(
@@ -73,3 +73,4 @@ class Config:
 
         logging.info(f"\n======  Model Attributes  ======")
         logging.info(self._convert_node_to_json(self.config.model))
+
