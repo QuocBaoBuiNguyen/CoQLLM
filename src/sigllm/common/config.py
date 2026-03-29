@@ -36,7 +36,7 @@ class Config:
             raise KeyError("Missing 'model' section in configuration.")
         return OmegaConf.create({"model": model})
 
-    def _convert_to_dot_list(opts):
+    def _convert_to_dot_list(self, opts):
         if not opts:
             return []
         if opts[0].find("=") != -1:
