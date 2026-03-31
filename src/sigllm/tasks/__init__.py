@@ -12,4 +12,4 @@ def setup_task(cfg):
 
     return task
 
-__all__ = ["BaseTask", "RecBaseTask", "setup_task"]
+__all__ = ["BaseTask", "RecPretrainTask", "setup_task"]
