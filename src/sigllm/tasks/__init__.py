@@ -1,6 +1,7 @@
 
 
 from sigllm.common import registry
+from sigllm.tasks.rec_pretrain import RecPretrainTask
 
 
 def setup_task(cfg):
