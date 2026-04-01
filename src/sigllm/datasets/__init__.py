@@ -1,6 +1,7 @@
 """Dataset preprocessing for SigLLM."""
 
 from .data_preprocessing import build_ml1m
+from .movie.movie_ood_builder import MovieOODBuilder
 from .preprocess_test_cold_warm import process_warm_cold
 from .qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 
