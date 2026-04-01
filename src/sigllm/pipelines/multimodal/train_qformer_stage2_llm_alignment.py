@@ -15,6 +15,7 @@ from sigllm.common.config import Config
 from sigllm.common.utils import now
 from sigllm.common.dist_utils import get_rank, init_distributed_mode
 from datetime import datetime
+from sigllm.runners.runner_base_rec import RecRunnerBase
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train LLM for recommendation")
