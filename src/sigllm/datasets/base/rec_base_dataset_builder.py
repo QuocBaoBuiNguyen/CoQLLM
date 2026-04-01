@@ -28,7 +28,6 @@ class RecBaseDatasetBuilder(ABC):
     def __init__(self, dataset_config) -> None:
         self.dataset_config = dataset_config
     
-    @abstractmethod
     def build_datasets(self, evaluate_only=False):
         """Construct dataset instances for training/validation/test."""
 
