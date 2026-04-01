@@ -42,7 +42,7 @@ class RecBaseTask:
     def build_datasets(self, cfg):
         datasets = dict()
         datasets_config = cfg.datasets_cfg
-        evaluate_only = cfg.run_cfg.evaluate_only
+        evaluate_only = cfg.run_cfg.evaluate
 
         assert len(datasets_config) > 0, "At least one dataset has to be specified."
 
