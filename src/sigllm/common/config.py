@@ -1,4 +1,6 @@
 import logging
+import json
+
 
 from omegaconf import OmegaConf
 from sigllm.common import registry
@@ -42,6 +44,10 @@ class Config:
         if opts[0].find("=") != -1:
             return opts
         return [(opt + "=" + value) for opt, value in zip(opts[0::2], opts[1::2])]
+
+    def _convert_node_to_json(self, node):
+        container = OmegaConf.to_container(node, resolve=True)
+        return json.dumps(container, indent=4, sort_keys=True)
     
     @property
     def run_cfg(self):
