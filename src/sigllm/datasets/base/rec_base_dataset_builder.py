@@ -39,7 +39,7 @@ class RecBaseDatasetBuilder(ABC):
         build_info = self.dataset_config.build_info
         storage_path = build_info.storage
 
-        if storage_path is None or not storage_path.exists():
+        if storage_path is None:
             log_step("Warning", f"storage path {storage_path} does not exist.") 
 
         datasets = dict()
