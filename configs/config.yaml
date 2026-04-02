@@ -46,10 +46,10 @@ model:
 
 datasets:
   movie_ood:
-    path: "/content/datasets/ml-1m/"
+    path: "/content/SigLLM/data/processed/ml-1m/"
     data_type: default
     build_info:
-      storage: "/content/datasets/ml-1m/"
+      storage: "/content/SigLLM/data/processed/ml-1m/"
 
 run:
   task: rec_pretrain
