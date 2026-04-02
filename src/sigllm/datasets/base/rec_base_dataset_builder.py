@@ -46,25 +46,25 @@ class RecBaseDatasetBuilder(ABC):
 
         if not evaluate_only:            
             datasets["train"] = dataset_cls(
-                config=self.dataset_config,
+                dataset_config=self.dataset_config,
                 filename="train",
             )
 
             datasets["valid"] = dataset_cls(
-                config=self.dataset_config,
+                dataset_config=self.dataset_config,
                 filename="valid_small",
             )
             datasets["test"] = dataset_cls(
-                config=self.dataset_config,
+                dataset_config=self.dataset_config,
                 filename="test",
             )
         else:
             datasets['test_warm'] = dataset_cls(
-                config=self.dataset_config,
+                dataset_config=self.dataset_config,
                 filename="test_warm_cold=warm",
             )
             datasets['test_cold'] = dataset_cls(
-                config=self.dataset_config,
+                dataset_config=self.dataset_config,
                 filename="test_warm_cold=cold",
             )
 
