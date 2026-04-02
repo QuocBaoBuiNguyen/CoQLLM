@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal, Optional
 import pandas as pd
 import numpy as np
@@ -26,13 +27,13 @@ class MovieOODDataset(RecBaseDataset):
 		filename: str = None,
 		subset: Literal["all", "warm", "cold"] = "all"
 	) -> None:
-		super().__init__()
-		ann_path = dataset_config.build_info.storage / filename
+		ann_path = Path(dataset_config.build_info.storage) / filename
 		
 		if (ann_path is None) or (not ann_path.exists()):
 			raise ValueError(f"Annotation path {ann_path} does not exist.")
 		
 		df = pd.read_pickle(ann_path.with_suffix(".pkl")).reset_index(drop=True)
+		self.annotation = df.copy()
 
 		if subset == "warm":
 			self.annotation = df[df['warm'].isin([1])].copy()
@@ -69,7 +70,7 @@ class MovieOODDataset(RecBaseDataset):
 			self.annotation = self.annotation[used_columns]
 			self.annotation.columns = renamed_columns
 		
-		log_step("data path:", ann_path, "data size:", self.annotation.shape)
+		log_step("data path", f"{ann_path} | data size: {self.annotation.shape}")
 		self.user_num = self.annotation['UserID'].max() + 1
 		self.item_num = self.annotation['TargetItemID'].max() + 1
 
