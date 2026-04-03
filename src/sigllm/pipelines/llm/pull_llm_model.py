@@ -2,7 +2,7 @@ import os
 import torch
 from transformers import LlamaTokenizer, LlamaForCausalLM
 
-def pull_model(model_path="openlm-research/open_llama_3b", save_dir="./content/ckpt/llm/base"):
+def pull_model(model_path="openlm-research/open_llama_3b", save_dir="./ckpt/llm/base"):
     """
     Download and save the base LLaMA model and tokenizer.
     """
