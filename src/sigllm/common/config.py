@@ -61,6 +61,8 @@ class Config:
     def model_cfg(self):
         return self.config.model
 
+    def to_dict(self):
+        return OmegaConf.to_container(self.config)
     
     def pretty_print(self):
         logging.info("\n=====  Running Parameters    =====")
