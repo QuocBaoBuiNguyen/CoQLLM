@@ -39,8 +39,8 @@ model:
   rec_config:
     user_num: -100
     item_num: -100
-    embedding_size: 256
-    pretrained_path: "/content/mf/0912_ml1m_oodv2_best_model_d256lr-0.001wd0.0001.pth"
+    embedding_size: 256    
+    pretrained_path: "/content/SigLLM/ckpt/mf/mf_model.pth"
 
   ckpt: /content/
 
