@@ -42,7 +42,7 @@ model:
     embedding_size: 256    
     pretrained_path: "/content/SigLLM/ckpt/mf/mf_model.pth"
 
-  ckpt: /content/
+  ckpt: null
 
 datasets:
   movie_ood:
