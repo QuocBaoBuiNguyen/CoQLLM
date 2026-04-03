@@ -6,7 +6,6 @@ import random as random
 import webdataset as wds
 
 
-@staticmethod
 def apply_to_sample(f, sample):
     if len(sample) == 0:
         return {}
@@ -24,14 +23,15 @@ def apply_to_sample(f, sample):
     return _apply(sample)
 
 
-@staticmethod
-def move_to_cuda(sample):
+def move_to_cuda(sample, cuda_enabled=True):
+    if not cuda_enabled:
+        return sample
+
     def _move_to_cuda(tensor):
         return tensor.cuda()
 
     return apply_to_sample(_move_to_cuda, sample)
 
-@staticmethod
 def reorg_datasets_by_split(datasets):
     """
     Organizes datasets by split.
