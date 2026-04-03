@@ -64,6 +64,18 @@ class RecBaseTask:
     def valid_step(self, model, samples):
         outputs = model.generate_for_samples(samples)
         return outputs
+
+    def before_evaluation(self, model, dataset, **kwargs):
+        model.before_evaluation(dataset=dataset, task_type=type(self))
+
+    def evaluation(self, model, data_loader, cuda_enabled=True):
+        return self.evaluate(model=model, data_loader=data_loader, cuda_enabled=cuda_enabled)
+
+    def after_evaluation(self, **kwargs):
+        pass
+
+    def inference_step(self):
+        raise NotImplementedError
     
     def train_epoch(
         self,
