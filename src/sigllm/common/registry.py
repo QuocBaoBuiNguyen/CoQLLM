@@ -8,6 +8,7 @@ class Registry:
         "task_name_mapping": {},
         "model_name_mapping": {},
         "runner_name_mapping": {},
+        "paths": {},
         "state": {},
     }
 

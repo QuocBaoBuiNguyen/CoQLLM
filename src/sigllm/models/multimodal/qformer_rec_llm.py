@@ -618,7 +618,7 @@ class QRecLLM(Rec2Base):
 
         ckpt_path = cfg.get("ckpt", "")
         if ckpt_path:
-            log_step("Load MiniGPT4Rec Checkpoint: {}".format(ckpt_path))
+            log_step("Load QRecLLM Checkpoint: {}".format(ckpt_path))
             ckpt = torch.load(ckpt_path, map_location="cpu")
             msg = model.load_state_dict(ckpt['model'], strict=False)
             log_step("loading message, msg.... {}".format(msg))

@@ -53,7 +53,7 @@ datasets:
 
 run:
   task: rec_pretrain
-  output_dir: "/content/open_llama_3b_finetune_log"
+  output_dir: "ckpt/qformer_stage2_llm_finetune"
   device: "cuda"
   seed: 42
   
