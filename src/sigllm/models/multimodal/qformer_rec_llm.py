@@ -6,7 +6,6 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from transformers import LlamaTokenizer, LlamaForCausalLM, BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model
 
 import os
 
@@ -69,6 +68,7 @@ class QRecLLM(Rec2Base):
 
         self.low_resource = low_resource
         self.proj_token_num = proj_token_num
+        self.use_lora = False
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -629,4 +629,3 @@ class QRecLLM(Rec2Base):
         model.set_answer_type(mode=ans_type)
         model.print_prompt()
         return model
-
