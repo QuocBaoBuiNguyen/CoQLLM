@@ -10,6 +10,7 @@ from sigllm.common.data_utils import move_to_cuda
 from sigllm.common.dist_utils import *
 from sigllm.common.logger import MetricLogger, SmoothedValue
 from sigllm.common.logging_utils import NotebookLogger
+from sigllm.models.multimodal.qformer_rec_llm import QRecLLM
 from sigllm.pipelines.rec.train_rec_baseline import calculate_user_auc
 
 LOGGER = NotebookLogger.rich_logger("sigllm.tasks.base.rec_base_task")

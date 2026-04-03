@@ -134,7 +134,7 @@ class Registry:
         """
 
         def wrap(model_cls):
-            from sigllm.models import BaseModel
+            from sigllm.models.multimodal.base.base_model import BaseModel
 
             assert issubclass(
                 model_cls, BaseModel
