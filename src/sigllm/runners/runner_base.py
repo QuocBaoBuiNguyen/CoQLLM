@@ -15,6 +15,7 @@ from pathlib import Path
 import torch
 import torch.distributed as dist
 import webdataset as wds
+from sigllm.common.data_utils import reorg_datasets_by_split
 from sigllm.common.dist_utils import *
 from sigllm.common.registry import registry
 from sigllm.common.utils import is_url
@@ -108,6 +109,8 @@ class RunnerBase:
         A property to get and create dataloaders by split just in need.
         """
         if self._dataloaders is None:
+            self.datasets = reorg_datasets_by_split(self.datasets)
+
             self._dataloaders = build_dataloaders(
                 datasets=self.datasets,
                 config=self.config,

@@ -3,7 +3,7 @@ import logging
 import webdataset as wds
 from torch.utils.data import DataLoader, DistributedSampler
 from sigllm.common.dist_utils import get_world_size, get_rank
-from sigllm.common.data_utils import reorg_datasets_by_split, ChainDataset
+from sigllm.common.data_utils import ChainDataset
 from sigllm.common.dataloader_utils import MultiIterLoader, PrefetchLoader, IterLoader
 
 def build_dataloaders(datasets, config, train_splits, use_distributed, use_dist_eval_sampler):
@@ -13,8 +13,6 @@ def build_dataloaders(datasets, config, train_splits, use_distributed, use_dist_
     logging.info(
         "dataset_ratios not specified, datasets will be concatenated (map-style datasets) or chained (webdataset.DataPipeline)."
     )
-
-    datasets = reorg_datasets_by_split(datasets)
 
     # print dataset statistics after concatenation/chaining
     for split_name in datasets:
@@ -68,8 +66,6 @@ def build_dataloaders(datasets, config, train_splits, use_distributed, use_dist_
             collate_fns.append([getattr(d, "collater", None) for d in dataset])
         else:
             collate_fns.append(getattr(dataset, "collater", None))
-
-    log_freq = config.run_cfg.get("log_freq", 50)
     
     loaders = create_loaders(
         datasets=datasets_list,
