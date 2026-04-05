@@ -354,11 +354,9 @@ class QRecLLM(Rec2Base):
         # NOTE: assume TextEncoder returns (h, pooled) like stage1
 
         with self.maybe_autocast():
-            all_user_embeds, all_item_embeds = self.rec_encoder.compute()
-
-            # 1) CF vectors
-            user_cf = self.rec_encoder.user_encoder(batch_data["UserID"], all_users=all_user_embeds)          # [B,d_cf]
-            target_cf = self.rec_encoder.item_encoder(batch_data["TargetItemID"], all_items=all_item_embeds)  # [B,d_cf]
+            # Stage-2 uses the in-tree rec encoder API: direct embedding lookup from ids.
+            user_cf = self.rec_encoder.user_encoder(batch_data["UserID"])          # [B,d_cf]
+            target_cf = self.rec_encoder.item_encoder(batch_data["TargetItemID"])  # [B,d_cf]
 
             # 2) QFormer outputs (instruction-conditioned)
             user_q = self.qformer(user_cf, ins_tok_emb)        # [B,Q,d_model]
@@ -378,7 +376,7 @@ class QRecLLM(Rec2Base):
                 ids = batch_data["InteractedItemIDs_pad"]  # [B,L]
                 L = ids.shape[1]
 
-                inter_cf = self.rec_encoder.item_encoder(ids, all_items=all_item_embeds)  # [B,L,d_cf]
+                inter_cf = self.rec_encoder.item_encoder(ids)                              # [B,L,d_cf]
                 inter_cf_flat = inter_cf.reshape(B * L, -1)                               # [B*L,d_cf]
                 ins_rep = ins_tok_emb.repeat_interleave(L, dim=0)                         # [B*L,L_ins,d_model]
 
