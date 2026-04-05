@@ -308,7 +308,7 @@ class QRecLLM(Rec2Base):
         self.rec_encoder.to("cpu")
         self.rec_encoder.float()
     
-    def get_placeholder_order(prompt: str, placeholders=PLACEHOLDERS_FOR_EMBED):
+    def get_placeholder_order(self, prompt: str, placeholders=PLACEHOLDERS_FOR_EMBED):
         positions = []
         for ph in placeholders:
             pos = prompt.find(ph)
