@@ -552,6 +552,30 @@ class QRecLLM(Rec2Base):
         llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
         return llm_embeds, llm_atts
 
+    def generate_for_samples(self, samples, return_all=False):
+        prompt = self.prompt_list[0]
+        input_embeds, input_atts = self.build_llm_inputs_from_prompt_v2(prompt, samples)
+        label_embeds, label_tokens, ans_map = self.build_llm_outputs_from_labels(samples)
+
+        full_embeds, full_atts = self.assemble_llm_sequences(
+            input_embeds, input_atts, label_embeds, label_tokens.attention_mask
+        )
+
+        targets = self.prepare_llm_targets(input_atts, label_tokens)
+
+        outputs = self.execute_llm_forward(full_embeds, full_atts, targets)
+        loss = self.calculate_recommendation_loss(outputs, label_tokens, samples, ans_map)
+
+        pos_id = self.llama_tokenizer(ans_map[1], add_special_tokens=False).input_ids[0]
+        label_seq_len = label_tokens.input_ids.shape[-1]
+        logits = outputs.logits[:, -(label_seq_len + 1), :][:, pos_id]
+        logits = torch.sigmoid(logits)
+
+        if return_all:
+            return outputs, logits
+
+        return {"loss": loss, "logits": logits}
+
     def forward_v2(self, batch_data):
         prompt = random.choices(self.prompt_list, weights=[5, 5, 5, 1], k=1)[0]
         input_embeds, input_atts = self.build_llm_inputs_from_prompt_v2(prompt, batch_data)
