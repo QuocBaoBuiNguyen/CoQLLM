@@ -1,1 +1,1 @@
-#Question: A user has given high ratings to the following movies: <ItemTitleList>.<UserCF> Leverage the information above to predict whether the user would enjoy the movie titled <TargetItemTitle>.<TargetItemCF>Answer with "Yes" or "No". \n#Answer:
+#Question: A user has given high ratings to the following movies: <ItemTitleList>. <UserID> Leverage the information above to predict whether the user would enjoy the movie titled <TargetItemTitle>. <TargetItemID> Answer with "Yes" or "No". \n#Answer:
