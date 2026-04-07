@@ -269,6 +269,13 @@ class QRecLLM(Rec2Base):
             self.prompt_list = []
             self.prompt_list_p = None
 
+    def _sample_prompt(self):
+        return random.choices(
+            self.prompt_list,
+            weights=[5] * (len(self.prompt_list) - 1) + [1],
+            k=1,
+        )[0]
+
     def set_mode(self, mode):
         '''
         mode \in ['v1','v2',None]
@@ -302,7 +309,7 @@ class QRecLLM(Rec2Base):
             raise NotImplementedError("not implement this types of answers")
 
     def print_prompt(self):
-        log_step('Prompt Pos Example \n{} {} or {}'.format(random.choice(self.prompt_list),self.pos_ans[0],self.neg_ans[0]))
+        log_step('Prompt Pos Example \n{} {} or {}'.format(self._sample_prompt(),self.pos_ans[0],self.neg_ans[0]))
     
     def rec_to_cpu(self):
         self.rec_encoder.to("cpu")
@@ -450,7 +457,7 @@ class QRecLLM(Rec2Base):
             prompt_list.append(current_prompt)
         
         if not self.has_print_prompt:
-            log_step("prompt example:", random.choice(prompt_list))
+            log_step("prompt example:", prompt_list[0])
             self.has_print_prompt = True
 
         self.llama_tokenizer.padding_side = "left"
@@ -575,7 +582,7 @@ class QRecLLM(Rec2Base):
         return {"loss": loss, "logits": logits}
 
     def forward_v2(self, batch_data):
-        prompt = random.choices(self.prompt_list, weights=[5, 5, 5, 1], k=1)[0]
+        prompt = self._sample_prompt()
         input_embeds, input_atts = self.build_llm_inputs_from_prompt_v2(prompt, batch_data)
         label_embeds, label_tokens, ans_map = self.build_llm_outputs_from_labels(batch_data)
 
