@@ -8,6 +8,7 @@ class Registry:
         "task_name_mapping": {},
         "model_name_mapping": {},
         "runner_name_mapping": {},
+        "lr_scheduler_name_mapping": {},
         "paths": {},
         "state": {},
     }
@@ -41,6 +42,33 @@ class Registry:
     def get_builder_class(cls, name):
         return cls.mapping["builder_name_mapping"].get(name, None)
 
+    @classmethod
+    def register_lr_scheduler(cls, name):
+        r"""Register a model to registry with key 'name'
+
+        Args:
+            name: Key with which the task will be registered.
+
+        Usage:
+
+            from minigpt4.common.registry import registry
+        """
+
+        def wrap(lr_sched_cls):
+            if name in cls.mapping["lr_scheduler_name_mapping"]:
+                raise KeyError(
+                    "Name '{}' already registered for {}.".format(
+                        name, cls.mapping["lr_scheduler_name_mapping"][name]
+                    )
+                )
+            cls.mapping["lr_scheduler_name_mapping"][name] = lr_sched_cls
+            return lr_sched_cls
+
+        return wrap
+
+    @classmethod
+    def get_lr_scheduler_class(cls, name):
+        return cls.mapping["lr_scheduler_name_mapping"].get(name, None)
     
     @classmethod
     def register(cls, name, obj):
