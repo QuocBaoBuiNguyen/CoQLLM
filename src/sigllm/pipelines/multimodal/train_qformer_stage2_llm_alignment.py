@@ -19,7 +19,7 @@ from sigllm.runners.runner_base_rec import RecRunnerBase
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train LLM for recommendation")
-    parser.add_argument("--cfg-path", default="configs/training/llm_rec_config.yaml",type=str, required=True, help="Path to the config file.")
+    parser.add_argument("--cfg-path", default="/content/SigLLM/configs/config.yaml",type=str, required=True, help="Path to the config file.")
     parser.add_argument(
         "--options",
         nargs="+",
