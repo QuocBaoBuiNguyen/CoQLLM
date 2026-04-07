@@ -22,7 +22,7 @@ model:
   item_num: -100
 
   lora_config:
-    use_lora: True
+    use_lora: False
     r: 8
     alpha: 16
     target_modules: ["q_proj", "v_proj"]
