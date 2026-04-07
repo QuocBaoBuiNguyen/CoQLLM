@@ -6,7 +6,7 @@ model:
   prompt_template: "{}"
   
   freeze_rec: True
-  freeze_proj: True
+  freeze_proj: False
   freeze_lora: False
   
   max_txt_len: 1024

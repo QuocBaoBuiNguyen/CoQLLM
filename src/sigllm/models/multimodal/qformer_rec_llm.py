@@ -77,19 +77,19 @@ class QRecLLM(Rec2Base):
         # Initialize components
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model, low_resource, device_8bit)
-        self.text_encoder, d_model = self._init_text_encoder(freeze_qformer=False)
+        self.text_encoder, d_model = self._init_text_encoder(freeze_text_encoder=True)
         self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, pretrained_qformer="/content/SigLLM/ckpt/qformer_stage1/qformer_stage1_best.pth", freeze_qformer=False)
         self._init_projection(proj_mid, proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
 
-    def _init_text_encoder(self, freeze_qformer: bool):
+    def _init_text_encoder(self, freeze_text_encoder: bool):
         """
         Initializes the TextEncoder.
         """
         text_encoder = TextEncoder(model_name="bert-base-uncased")
         
         # Freeze if necessary
-        if freeze_qformer:
+        if freeze_text_encoder:
             for p in text_encoder.parameters():
                 p.requires_grad = False
             text_encoder.eval()
