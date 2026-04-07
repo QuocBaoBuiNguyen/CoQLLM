@@ -3,6 +3,7 @@ import logging
 import os
 from typing import Optional
 from sklearn.metrics import roc_auc_score
+import torch
 import torch.distributed as dist
 from sigllm import datasets
 from sigllm.common import registry
@@ -96,17 +97,28 @@ class RecBaseTask:
         metric_logger.add_meter("lr", SmoothedValue(window_size=1, fmt="{value:.6f}"))
         metric_logger.add_meter("loss", SmoothedValue(window_size=1, fmt="{value:.4f}"))
 
-        header = f"Train Epoch: [{epoch}]"
+        iters_per_epoch = lr_scheduler.iters_per_epoch
+        header = f"Train: data epoch: [{epoch}]"
         
-        # Training loop
-        for step, samples in enumerate(metric_logger.log_every(data_loader, log_freq, header)):
-            # 1. Move data to GPU if enabled and update learning rate scheduler
+        # Iter-based training loop
+        for step in metric_logger.log_every(range(iters_per_epoch), log_freq, header):
+            samples = next(data_loader)
+
             if cuda_enabled:
                 samples = move_to_cuda(samples)
+
+            samples.update(
+                {
+                    "epoch": epoch,
+                    "num_iters_per_epoch": iters_per_epoch,
+                    "iters": step,
+                }
+            )
+
             lr_scheduler.step(cur_epoch=epoch, cur_step=step)
 
-            # 1. Forward pass with Automatic Mixed Precision (AMP)
-            with torch.amp.autocast('cuda', enabled=use_amp):
+            # Forward pass with Automatic Mixed Precision (AMP)
+            with torch.amp.autocast("cuda", enabled=use_amp):
                 loss = self.train_step(model=model, samples=samples)
                 loss = loss / accum_grad_iters # Chia loss để hỗ trợ Gradient Accumulation
 
