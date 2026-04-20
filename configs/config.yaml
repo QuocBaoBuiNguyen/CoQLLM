@@ -37,8 +37,8 @@ model:
     num_layers: 2
 
   rec_config:
-    user_num: -100
-    item_num: -100
+    user_num: 839
+    item_num: 3256
     embedding_size: 256    
     pretrained_path: "/content/SigLLM/ckpt/mf/mf_model.pth"
 
@@ -57,17 +57,47 @@ run:
   device: "cuda"
   seed: 42
   rec_baseline:
-    save_file: "/content/SigLLM/ckpt/mf/mf_model.pth"
+    save_file: ${model.rec_config.pretrained_path}
     need_train: True
     warm_or_cold: "warm"
     seed: 2025
     lr: 1e-3
     wd: 1e-4
-    embedding_size: 256
+    embedding_size: ${model.rec_config.embedding_size}
     epoch: 5000
     eval_epoch: 1
     patience: 100
     batch_size: 1024
+  qformer_stage1:
+    batch_size: 256
+    num_workers: 4
+    embedding_size: ${model.rec_config.embedding_size}
+    user_num: ${model.rec_config.user_num}
+    item_num: ${model.rec_config.item_num}
+    num_queries: ${model.qformer_config.num_queries}
+    num_heads: ${model.qformer_config.num_heads}
+    num_layers: ${model.qformer_config.num_layers}
+    neg_k: 32
+    hard_k: 8
+    p_fixed: 0.8
+    lr: 1e-4
+    w_ui: 1.0
+    w_it: 0.10
+    tau_ui: 0.05
+    tau_it: 0.10
+    weight_decay: 1e-4
+    debug_batch: True
+    debug_batch_max_steps: 1
+    early_stopping_patience: 10
+    early_stopping_min_delta: 1e-4
+    best_checkpoint_name: "best_qformer_stage1.pt"
+    log_epoch: 1
+    epoch: 100
+    text_model_name: "bert-base-uncased"
+    pretrained_rec_path: ${model.rec_config.pretrained_path}
+    freeze_rec: True
+    freeze_text_encoder: True
+    output_dir: "/content/SigLLM/ckpt/qformer_stage1/"
   
   # Optimization
   lr_sched: "linear_warmup_cosine_lr"

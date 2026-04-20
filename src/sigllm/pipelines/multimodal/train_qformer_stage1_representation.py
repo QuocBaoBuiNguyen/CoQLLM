@@ -1,3 +1,4 @@
+import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -6,6 +7,7 @@ from pathlib import Path
 import omegaconf
 import os
 
+from sigllm.common.config import Config
 from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
@@ -44,12 +46,12 @@ def _init_rec_model(cfg, device):
     })
     mf = MatrixFactorization(mf_config).to(device)
 
-    pretrained_rec_path = cfg.get("pretrained_rec_path", "not_have")
-    if mf is not None and pretrained_rec_path != "not_have" and os.path.exists(pretrained_rec_path):
+    pretrained_rec_path = cfg.pretrained_rec_path
+    if mf is not None and os.path.exists(pretrained_rec_path):
         mf.load_state_dict(torch.load(pretrained_rec_path, map_location="cpu"))
         print(f"Successfully loaded the pretrained rec model from {pretrained_rec_path}")
 
-    if cfg.get("freeze_rec", False) and mf is not None:
+    if cfg.freeze_rec and mf is not None:
         for param in mf.parameters():
             param.requires_grad = False
         mf.eval()
@@ -83,12 +85,10 @@ def _init_text_encoder(cfg, device):
     """
     Initializes the TextEncoder.
     """
-    # d_model = cfg.get("text_d_model", 768)
-    text_model_name = cfg.get("text_model_name", "bert-base-uncased")
-    text_encoder = TextEncoder(model_name=text_model_name).to(device)
+    text_encoder = TextEncoder(model_name=cfg.text_model_name).to(device)
     
     # Freeze if necessary
-    if cfg.get("freeze_text_encoder", True):
+    if cfg.freeze_text_encoder:
         for p in text_encoder.parameters():
             p.requires_grad = False
         text_encoder.eval()
@@ -290,9 +290,9 @@ def train_qformer_stage1_representation(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader = _init_dataset(cfg, filename=cfg.data_dir + "train_qformer_ood2.pkl", shuffle=True)
-    val_loader = _init_dataset(cfg, filename=cfg.data_dir + "valid_qformer_ood2.pkl", shuffle=False)
-    test_loader = _init_dataset(cfg, filename=cfg.data_dir + "test_qformer_ood2.pkl", shuffle=False)
+    train_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "train_qformer_ood2.pkl"), shuffle=True)
+    val_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "valid_qformer_ood2.pkl"), shuffle=False)
+    test_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "test_qformer_ood2.pkl"), shuffle=False)
     
     mf = _init_rec_model(cfg, device)
     text_encoder, d_model = _init_text_encoder(cfg, device)
@@ -301,9 +301,9 @@ def train_qformer_stage1_representation(cfg):
     model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
     opt = _init_optimizer(model, cfg.lr, weight_decay=cfg.weight_decay)
 
-    outdir = cfg.get("output_dir", "/content/SigLLM/ckpt/qformer_stage1/")
+    outdir = cfg.output_dir
     os.makedirs(outdir, exist_ok=True)
-    best_checkpoint_path = os.path.join(outdir, cfg.get("best_checkpoint_name", "best_qformer_stage1.pt"))
+    best_checkpoint_path = os.path.join(outdir, cfg.best_checkpoint_name)
     best_val_loss = float("inf")
     best_epoch = -1
     early_stop_counter = 0
@@ -426,55 +426,90 @@ def train_qformer_stage1_representation(cfg):
 
 
 def main():
-    train_cfg_dict = {
-        "data_dir": "/content/SigLLM/data/processed/ml-1m/",
-        "batch_size": 256,
-        "num_workers": 4,
-        "embedding_size": 256,
-        "user_num": 839,
-        "item_num": 3256,
-        "num_queries": 8,
-        "num_heads": 8,
-        "num_layers": 2,
-        "neg_k": 32,
-        "hard_k": 8,
-        "p_fixed": 0.8,
-        "lr": 1e-4,
-        "w_ui": 1.0,
-        "w_it": 0.10,
-        "tau_ui": 0.05,
-        "tau_it": 0.10,
-        "weight_decay": 1e-4,
-        "debug_batch": True,
-        "debug_batch_max_steps": 1,
-        "early_stopping_patience": 10,
-        "early_stopping_min_delta": 1e-4,
-        "best_checkpoint_name": "best_qformer_stage1.pt",
-        "log_epoch": 1,
-        "epoch": 100,
-        "text_model_name": "bert-base-uncased",
-        "text_d_model": 768,
-        "pretrained_rec_path": "/content/SigLLM/ckpt/mf/mf_model.pth",
-        "freeze_rec": True,
-        "freeze_text_encoder": True,
-    }
+    cfg = Config(parse_args())
+    stage1_cfg = cfg.run_cfg.get("qformer_stage1")
+    if stage1_cfg is None:
+        raise KeyError("Missing 'run.qformer_stage1' section in configuration.")
 
-    cfg = omegaconf.OmegaConf.create(train_cfg_dict)
+    required_keys = [
+        "batch_size",
+        "num_workers",
+        "embedding_size",
+        "user_num",
+        "item_num",
+        "num_queries",
+        "num_heads",
+        "num_layers",
+        "neg_k",
+        "hard_k",
+        "p_fixed",
+        "lr",
+        "w_ui",
+        "w_it",
+        "tau_ui",
+        "tau_it",
+        "weight_decay",
+        "debug_batch",
+        "debug_batch_max_steps",
+        "early_stopping_patience",
+        "early_stopping_min_delta",
+        "best_checkpoint_name",
+        "log_epoch",
+        "epoch",
+        "text_model_name",
+        "pretrained_rec_path",
+        "freeze_rec",
+        "freeze_text_encoder",
+        "output_dir",
+    ]
+    missing_keys = [key for key in required_keys if key not in stage1_cfg]
+    if missing_keys:
+        raise KeyError(
+            "Missing required keys in 'run.qformer_stage1': " + ", ".join(missing_keys)
+        )
+
+    first_dataset_key = list(cfg.datasets_cfg.keys())[0]
+    stage1_cfg.data_dir = cfg.datasets_cfg[first_dataset_key].path
 
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
-        input_pkl_path=cfg.data_dir + "train_ood2.pkl",
-        output_path=cfg.data_dir + "train_qformer_ood2.pkl"
+        input_pkl_path=os.path.join(stage1_cfg.data_dir, "train_ood2.pkl"),
+        output_path=os.path.join(stage1_cfg.data_dir, "train_qformer_ood2.pkl"),
+        neg_k=stage1_cfg.neg_k,
+        hard_k=stage1_cfg.hard_k,
+        p_fixed=stage1_cfg.p_fixed,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
-        input_pkl_path=cfg.data_dir + "valid_ood2.pkl",
-        output_path=cfg.data_dir + "valid_qformer_ood2.pkl"
+        input_pkl_path=os.path.join(stage1_cfg.data_dir, "valid_ood2.pkl"),
+        output_path=os.path.join(stage1_cfg.data_dir, "valid_qformer_ood2.pkl"),
+        neg_k=stage1_cfg.neg_k,
+        hard_k=stage1_cfg.hard_k,
+        p_fixed=stage1_cfg.p_fixed,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
-        input_pkl_path=cfg.data_dir + "test_ood2.pkl",
-        output_path=cfg.data_dir + "test_qformer_ood2.pkl"
+        input_pkl_path=os.path.join(stage1_cfg.data_dir, "test_ood2.pkl"),
+        output_path=os.path.join(stage1_cfg.data_dir, "test_qformer_ood2.pkl"),
+        neg_k=stage1_cfg.neg_k,
+        hard_k=stage1_cfg.hard_k,
+        p_fixed=stage1_cfg.p_fixed,
     )
 
-    train_qformer_stage1_representation(cfg)
+    train_qformer_stage1_representation(stage1_cfg)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train Q-Former stage 1 representation model")
+    parser.add_argument(
+        "--cfg-path",
+        default="configs/config.yaml",
+        type=str,
+        help="Path to the config file.",
+    )
+    parser.add_argument(
+        "--options",
+        nargs="+",
+        help="Override config settings in key=value format.",
+    )
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
