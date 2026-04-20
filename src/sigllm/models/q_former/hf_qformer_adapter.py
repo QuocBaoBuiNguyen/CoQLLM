@@ -90,13 +90,16 @@ class HFQFormerAdapter(nn.Module):
             isinstance(k, str) and k.startswith("qformer.") for k in remapped_state_dict
         )
         if not has_prefixed_qformer_keys:
-            prefixed_inner_keys = {
-                f"qformer.{key}": value
-                for key, value in remapped_state_dict.items()
-                if isinstance(key, str) and f"qformer.{key}" in expected_keys
-            }
-            if prefixed_inner_keys:
-                remapped_state_dict.update(prefixed_inner_keys)
+            fixed_state_dict = {}
+            remapped_any_key = False
+            for key, value in remapped_state_dict.items():
+                if isinstance(key, str) and f"qformer.{key}" in expected_keys:
+                    fixed_state_dict[f"qformer.{key}"] = value
+                    remapped_any_key = True
+                else:
+                    fixed_state_dict[key] = value
+            if remapped_any_key:
+                remapped_state_dict = fixed_state_dict
 
         return super().load_state_dict(remapped_state_dict, strict=strict)
 
