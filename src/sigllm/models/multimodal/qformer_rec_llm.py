@@ -12,7 +12,8 @@ import os
 from sigllm.common.logging_utils import NotebookLogger
 from sigllm.common.registry import registry
 from sigllm.models.multimodal.base.rec_base_model import Rec2Base
-from sigllm.models.q_former.q_former import QFormer
+# from sigllm.models.q_former.q_former import QFormer
+from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
 from sigllm.models.q_former.text_encoder import TextEncoder
 
 LOGGER = NotebookLogger.rich_logger("sigllm.rec_base_model")
@@ -165,7 +166,14 @@ class QRecLLM(Rec2Base):
         log_step("Loading QFormer")
 
         # 1) init qformer kiến trúc giống stage1
-        self.qformer = QFormer(
+        # self.qformer = QFormer(
+        #     d_cf=d_cf,
+        #     d_model=d_model,
+        #     num_queries=num_queries,
+        #     num_heads=num_heads,
+        #     num_layers=num_layers
+        # ).to(self.device)
+        self.qformer = HFQFormerAdapter(
             d_cf=d_cf,
             d_model=d_model,
             num_queries=num_queries,
@@ -221,7 +229,8 @@ class QRecLLM(Rec2Base):
             raise ValueError("llama_model is None. Please init LLM backbone before init projection.")
 
         d_q = self.qformer.proj_cf.out_features
-        Q = int(self.qformer.q.shape[0])
+        # Q = int(self.qformer.q.shape[0]) // Qformer self-implemented 
+        Q = int(self.qformer.q.shape[-2])
         H = int(self.llama_model.config.hidden_size)
 
         # luôn sync theo Q-Former để tránh lệch số <unk> khi inject

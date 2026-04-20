@@ -15,7 +15,8 @@ from sigllm.common.config import Config
 from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
-from sigllm.models.q_former.q_former import QFormer
+# from sigllm.models.q_former.q_former import QFormer
+from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
 from sigllm.models.q_former.text_encoder import TextEncoder
 from sigllm.models.projection.qformer_alignment_model import QRecInstructAlignmentModel
 
@@ -120,7 +121,14 @@ def _init_qformer(cfg, d_model, device):
     """
     Initializes the Q-Former model.
     """
-    return QFormer(
+    # return QFormer(
+    #     d_cf=cfg.embedding_size,
+    #     d_model=d_model,
+    #     num_queries=cfg.num_queries,
+    #     num_heads=cfg.num_heads,
+    #     num_layers=cfg.num_layers
+    # ).to(device)
+    return HFQFormerAdapter(
         d_cf=cfg.embedding_size, 
         d_model=d_model, 
         num_queries=cfg.num_queries, 

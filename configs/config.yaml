@@ -80,16 +80,16 @@ run:
     num_layers: ${model.qformer_config.num_layers}
     neg_k: 32
     hard_k: 8
-    p_fixed: 0.8
-    samples_per_user: 1
-    lr: 1e-4
+    p_fixed: 0.3
+    samples_per_user: 3
+    lr: 2e-4
     w_ui: 1.0
-    w_it: 0.10
+    w_it: 0.30
     tau_ui: 0.05
     tau_it: 0.10
-    weight_decay: 1e-4
+    weight_decay: 1e-3
     debug_batch: True
-    debug_batch_max_steps: 1
+    debug_batch_max_steps: 10
     early_stopping_patience: 10
     early_stopping_min_delta: 1e-4
     best_checkpoint_name: "best_qformer_stage1.pt"
