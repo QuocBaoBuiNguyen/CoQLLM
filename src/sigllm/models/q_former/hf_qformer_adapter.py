@@ -75,6 +75,31 @@ class HFQFormerAdapter(nn.Module):
         )
         self.qformer = Blip2QFormerModel(config)
 
+    def load_state_dict(self, state_dict, strict: bool = True):
+        """
+        Accept both adapter-native keys and keys where the inner HF Q-Former
+        prefix was stripped by external loading code.
+        """
+        if not isinstance(state_dict, dict):
+            return super().load_state_dict(state_dict, strict=strict)
+
+        remapped_state_dict = dict(state_dict)
+        expected_keys = set(super().state_dict().keys())
+
+        has_prefixed_qformer_keys = any(
+            isinstance(k, str) and k.startswith("qformer.") for k in remapped_state_dict
+        )
+        if not has_prefixed_qformer_keys:
+            prefixed_inner_keys = {
+                f"qformer.{key}": value
+                for key, value in remapped_state_dict.items()
+                if isinstance(key, str) and f"qformer.{key}" in expected_keys
+            }
+            if prefixed_inner_keys:
+                remapped_state_dict.update(prefixed_inner_keys)
+
+        return super().load_state_dict(remapped_state_dict, strict=strict)
+
     def forward(self, cf_vec: torch.Tensor, ins_token_emb: torch.Tensor) -> torch.Tensor:
         """
         Args:
