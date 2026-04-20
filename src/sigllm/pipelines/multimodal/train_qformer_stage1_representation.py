@@ -482,6 +482,7 @@ def main():
         "neg_k",
         "hard_k",
         "p_fixed",
+        "samples_per_user",
         "lr",
         "w_ui",
         "w_it",
@@ -517,6 +518,7 @@ def main():
         neg_k=stage1_cfg.neg_k,
         hard_k=stage1_cfg.hard_k,
         p_fixed=stage1_cfg.p_fixed,
+        samples_per_user=stage1_cfg.samples_per_user,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "valid_ood2.pkl"),
@@ -524,6 +526,7 @@ def main():
         neg_k=stage1_cfg.neg_k,
         hard_k=stage1_cfg.hard_k,
         p_fixed=stage1_cfg.p_fixed,
+        samples_per_user=stage1_cfg.samples_per_user,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "test_ood2.pkl"),
@@ -531,6 +534,7 @@ def main():
         neg_k=stage1_cfg.neg_k,
         hard_k=stage1_cfg.hard_k,
         p_fixed=stage1_cfg.p_fixed,
+        samples_per_user=stage1_cfg.samples_per_user,
     )
 
     train_qformer_stage1_representation(stage1_cfg)

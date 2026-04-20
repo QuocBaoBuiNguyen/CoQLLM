@@ -81,6 +81,7 @@ run:
     neg_k: 32
     hard_k: 8
     p_fixed: 0.8
+    samples_per_user: 1
     lr: 1e-4
     w_ui: 1.0
     w_it: 0.10
