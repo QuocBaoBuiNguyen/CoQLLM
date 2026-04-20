@@ -13,7 +13,7 @@ model:
   end_sym: "###"
   ans_type: "v2"
   
-  proj_token_num: 1
+  proj_token_num: ${model.qformer_config.num_queries}
   proj_drop: 0
   proj_mid_times: 10
   

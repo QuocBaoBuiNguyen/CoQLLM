@@ -30,6 +30,26 @@ def disabled_train(self, mode=True):
     return self
 
 
+def count_trainable_parameters(module: nn.Module) -> int:
+    return sum(param.numel() for param in module.parameters() if param.requires_grad)
+
+
+def tensor_stat_string(name: str, tensor: Optional[torch.Tensor]) -> str:
+    if tensor is None:
+        return f"{name}=None"
+    if tensor.numel() == 0:
+        return f"{name}=empty shape={tuple(tensor.shape)}"
+
+    detached = tensor.detach().float()
+    mean_val = detached.mean().item()
+    std_val = detached.std(unbiased=False).item()
+    norm_val = detached.norm(dim=-1).mean().item() if detached.dim() >= 2 else detached.norm().item()
+    return (
+        f"{name}: shape={tuple(detached.shape)}, "
+        f"mean={mean_val:.4f}, std={std_val:.4f}, mean_l2={norm_val:.4f}"
+    )
+
+
 @registry.register_model("mini_gpt4rec_v2")
 class QRecLLM(Rec2Base):
     """
@@ -70,6 +90,9 @@ class QRecLLM(Rec2Base):
         self.low_resource = low_resource
         self.proj_token_num = proj_token_num
         self.use_lora = False
+        self._has_logged_trainable_stats = False
+        self._flow_log_steps = 0
+        self._max_flow_log_steps = 3
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -260,6 +283,37 @@ class QRecLLM(Rec2Base):
         log_step("Loading Projection Done",
                 f"d_q={d_q}, H={H}, Q={self.proj_token_num}, mid={mid}")
 
+    def _log_trainable_module_stats(self):
+        if self._has_logged_trainable_stats:
+            return
+
+        stats = [
+            f"rec_encoder={count_trainable_parameters(self.rec_encoder) if self.rec_encoder is not None else 0}",
+            f"qformer={count_trainable_parameters(self.qformer) if self.qformer is not None else 0}",
+            f"llama_proj={count_trainable_parameters(self.llama_proj) if hasattr(self, 'llama_proj') else 0}",
+            f"llama_model={count_trainable_parameters(self.llama_model) if self.llama_model is not None else 0}",
+        ]
+        log_step("Trainable parameter counts", ", ".join(stats))
+        self._has_logged_trainable_stats = True
+
+    def _log_information_flow(self, user_q, target_q, user_llama, target_llama, merged_flat):
+        if self._flow_log_steps >= self._max_flow_log_steps:
+            return
+
+        log_step(
+            "Information flow",
+            " | ".join(
+                [
+                    tensor_stat_string("user_q", user_q),
+                    tensor_stat_string("target_q", target_q),
+                    tensor_stat_string("user_llama", user_llama),
+                    tensor_stat_string("target_llama", target_llama),
+                    tensor_stat_string("merged_embs", merged_flat),
+                ]
+            ),
+        )
+        self._flow_log_steps += 1
+
     def _init_prompts(self, prompt_path, prompt_template, max_txt_len, end_sym):
         self.max_txt_len = max_txt_len
         self.end_sym = end_sym
@@ -355,6 +409,8 @@ class QRecLLM(Rec2Base):
         if self.rec_encoder is None:
             return None, None
 
+        self._log_trainable_module_stats()
+
         device = batch_data["UserID"].device
         B = batch_data["UserID"].shape[0]
         Q = self.proj_token_num
@@ -429,6 +485,7 @@ class QRecLLM(Rec2Base):
                 "InteractedItems_embs": interacted_llama_flat,  # [B,L*Q,H] or None
                 "merged_embs": merged_flat,             # [N,H] or None
             }
+            self._log_information_flow(user_q, target_q, user_llama, target_llama, merged_flat)
 
         return rec_embeds, None
 
