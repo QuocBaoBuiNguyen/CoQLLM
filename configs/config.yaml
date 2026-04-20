@@ -56,6 +56,18 @@ run:
   output_dir: "ckpt/qformer_stage2_llm_finetune"
   device: "cuda"
   seed: 42
+  rec_baseline:
+    save_file: "/content/SigLLM/ckpt/mf/mf_model.pth"
+    need_train: True
+    warm_or_cold: "warm"
+    seed: 2025
+    lr: 1e-3
+    wd: 1e-4
+    embedding_size: 256
+    epoch: 5000
+    eval_epoch: 1
+    patience: 100
+    batch_size: 1024
   
   # Optimization
   lr_sched: "linear_warmup_cosine_lr"

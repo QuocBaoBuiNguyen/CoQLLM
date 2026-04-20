@@ -1,3 +1,4 @@
+import argparse
 import os
 import numpy as np
 import time as time
@@ -11,6 +12,7 @@ from typing import Optional
 from torch.utils.data import DataLoader
 
 from sigllm.common import NotebookLogger, EarlyStopping
+from sigllm.common.config import Config
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 
 LOGGER = NotebookLogger.rich_logger("sigllm.train_rec_baseline")
@@ -73,7 +75,7 @@ def calculate_user_auc(user_ids, y_pred, y_true):
 
     return avg_uauc, computed_users, auc_array
 
-def set_seed(seed=2025):
+def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -98,16 +100,38 @@ def get_model_predictions(model, data_loader, device):
             np.concatenate(all_preds), 
             np.concatenate(all_labels))
 
-def train_baseline_model(train_config, log_file=None, save_mode=False, save_file=None, need_train=True, warm_or_cold=None):
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train MF baseline for recommendation")
+    parser.add_argument(
+        "--cfg-path",
+        default="configs/config.yaml",
+        type=str,
+        help="Path to the config file.",
+    )
+    parser.add_argument(
+        "--options",
+        nargs="+",
+        help="Override config settings in key=value format.",
+    )
+    return parser.parse_args()
+
+
+def train_baseline_model(
+    train_config,
+    data_dir,
+    save_file=None,
+    need_train=True,
+    warm_or_cold=None,
+    seed=None,
+):
     # 1. Setup Environment
-    set_seed(2025)
+    set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    data_dir = "/content/SigLLM/data/processed/ml-1m/"
     
     # 2. Load and Filter Data
-    train_data = pd.read_pickle(data_dir+"train_ood2.pkl")[['uid','iid','label']].values
-    valid_data = pd.read_pickle(data_dir+"valid_ood2.pkl")[['uid','iid','label']].values
-    test_data = pd.read_pickle(data_dir+"test_ood2.pkl")[['uid','iid','label']].values
+    train_data = pd.read_pickle(os.path.join(data_dir, "train_ood2.pkl"))[['uid','iid','label']].values
+    valid_data = pd.read_pickle(os.path.join(data_dir, "valid_ood2.pkl"))[['uid','iid','label']].values
+    test_data = pd.read_pickle(os.path.join(data_dir, "test_ood2.pkl"))[['uid','iid','label']].values
 
     user_num = max(train_data[:,0].max(), valid_data[:,0].max(), test_data[:,0].max()) + 1
     item_num =  max(train_data[:,1].max(), valid_data[:,1].max(), test_data[:,1].max()) + 1
@@ -116,11 +140,11 @@ def train_baseline_model(train_config, log_file=None, save_mode=False, save_file
 
     if warm_or_cold is not None:
         if warm_or_cold == 'warm':
-            test_data = pd.read_pickle(data_dir+"test_warm_cold_ood2.pkl")[['uid','iid','label', 'warm']]
+            test_data = pd.read_pickle(os.path.join(data_dir, "test_warm_cold_ood2.pkl"))[['uid','iid','label', 'warm']]
             test_data = test_data[test_data['warm'].isin([1])][['uid','iid','label']].values
             log_step("warm data size:", str(test_data.shape[0]))
         else:
-            test_data = pd.read_pickle(data_dir+"test_warm_cold_ood2.pkl")[['uid','iid','label', 'cold']]
+            test_data = pd.read_pickle(os.path.join(data_dir, "test_warm_cold_ood2.pkl"))[['uid','iid','label', 'cold']]
             test_data = test_data[test_data['cold'].isin([1])][['uid','iid','label']].values
             log_step("cold data size:", str(test_data.shape[0]))
 
@@ -195,7 +219,7 @@ def train_baseline_model(train_config, log_file=None, save_mode=False, save_file
 
             if improved:
                 log_step(f"New best model found at epoch {epoch} with Valid uAUC: {valid_uauc:.4f}")
-                if save_mode and save_file is not None:
+                if save_file is not None:
                     torch.save(model.state_dict(), save_file)
                     log_step(f"Model saved to {save_file}")
 
@@ -210,22 +234,59 @@ def train_baseline_model(train_config, log_file=None, save_mode=False, save_file
     # 6. Final Logging
     final_log = f"Train Config: {train_config}\nBest Results: {stopper.best_full_metric}"
     log_step(final_log)
-    if log_file:
-        log_file.write(final_log + "\n")
-        log_file.flush()
 
     return stopper.best_full_metric
 
+
+def main():
+    cfg = Config(parse_args())
+    baseline_cfg = cfg.run_cfg.get("rec_baseline")
+    if baseline_cfg is None:
+        raise KeyError("Missing 'run.rec_baseline' section in configuration.")
+
+    first_dataset_key = list(cfg.datasets_cfg.keys())[0]
+    required_keys = [
+        "save_file",
+        "need_train",
+        "warm_or_cold",
+        "seed",
+        "lr",
+        "wd",
+        "embedding_size",
+        "epoch",
+        "eval_epoch",
+        "patience",
+        "batch_size",
+    ]
+    missing_keys = [key for key in required_keys if key not in baseline_cfg]
+    if missing_keys:
+        raise KeyError(
+            "Missing required keys in 'run.rec_baseline': " + ", ".join(missing_keys)
+        )
+
+    train_config = baseline_cfg
+    data_dir = cfg.datasets_cfg[first_dataset_key].path
+    save_file = baseline_cfg["save_file"]
+    need_train = bool(baseline_cfg["need_train"])
+    warm_or_cold = baseline_cfg["warm_or_cold"]
+    seed = int(baseline_cfg["seed"])
+
+    log_step("Loaded config", f"cfg_path={cfg.args.cfg_path}")
+    log_step("Dataset dir", str(data_dir))
+    log_step("Dataset key", str(first_dataset_key))
+    log_step("Baseline mode", f"need_train={need_train}, warm_or_cold={warm_or_cold}")
+
+    if save_file is not None:
+        os.makedirs(os.path.dirname(save_file), exist_ok=True)
+
+    train_baseline_model(
+        train_config=train_config,
+        data_dir=data_dir,
+        save_file=save_file,
+        need_train=need_train,
+        warm_or_cold=warm_or_cold,
+        seed=seed,
+    )
+
 if __name__ == "__main__":
-    train_config = {
-        'lr': 1e-3,
-        'wd': 1e-4,
-        'embedding_size': 256,
-        "epoch": 5000,
-        "eval_epoch":1,
-        "patience":100,
-        "batch_size":1024
-    }
-    save_file = "/content/SigLLM/ckpt/mf/mf_model.pth"
-    os.makedirs(os.path.dirname(save_file), exist_ok=True)
-    train_baseline_model(train_config, save_mode=True, save_file=save_file, need_train=True, warm_or_cold='warm')
+    main()
