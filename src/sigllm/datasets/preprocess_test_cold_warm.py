@@ -53,26 +53,73 @@ def process_warm_cold(
     log_step("[1/5] Load datasets", f"dir={data_dir}")
     train_ = pd.read_pickle(train_path)
     test_ = pd.read_pickle(test_path)
+    # Example input:
+    # train_:
+    #   uid  iid  label  not_cold
+    #   1    10   1      1
+    #   1    25   0      1
+    #   1    33   1      1
+    #   1    50   1      1
+    #   2    18   1      1
+    #   2    41   1      1
+    #   2    52   0      1
+    #   3    60   1      1
+    #
+    # test_:
+    #   uid  iid  label  not_cold
+    #   1    41   1      1
+    #   2    60   1      1
+    #   3    25   0      0
+    #   4    99   1      0
     log_step("Loaded shapes", f"train={train_.shape}, test={test_.shape}")
 
     # --- User Analysis ---
     log_step("[2/5] Analyze User Interactions", f"Threshold > {min_user_inter}")
     user_info = train_.groupby('uid').agg({"label":'count'})
+    # Example user interaction count in train_:
+    # user_info =
+    #      label
+    # uid
+    # 1        4
+    # 2        3
+    # 3        1
+    # all_train_users = {1, 2, 3}
     all_train_users = set(user_info.index)
     
     # Filter warm users
     warm_users_df = user_info[user_info['label'] > min_user_inter]
     warm_users_set = set(warm_users_df.index)
+    # If min_user_inter = 3:
+    # warm_users_df =
+    #      label
+    # uid
+    # 1        4
+    # warm_users_set = {1}
     log_step("User stats", f"Total={len(all_train_users)}, Warm={len(warm_users_set)}")
 
     # --- Item Analysis ---
     log_step("[3/5] Analyze Item Interactions", f"Threshold > {min_item_inter}")
     item_info = train_.groupby('iid').agg({"label":'count'})
+    # Example item interaction count in train_:
+    # item_info =
+    #      label
+    # iid
+    # 10       1
+    # 18       1
+    # 25       1
+    # 33       1
+    # 41       1
+    # 50       1
+    # 52       1
+    # 60       1
     all_train_items = set(item_info.index)
 
     # Filter warm items
     warm_items_df = item_info[item_info['label'] > min_item_inter]
     warm_items_set = set(warm_items_df.index)
+    # If min_item_inter = 3 in this toy example:
+    # warm_items_df is empty
+    # warm_items_set = set()
     log_step("Item stats", f"Total={len(all_train_items)}, Warm={len(warm_items_set)}")
 
     # --- Compute Flags ---
@@ -89,6 +136,18 @@ def process_warm_cold(
         lambda x: 1 if (x['uid'] not in all_train_users and x['iid'] not in all_train_items) else 0, 
         axis=1
     )
+    # Example output on test_:
+    #   uid  iid  label  not_cold  warm  cold
+    #   1    41   1      1         0     0
+    #   2    60   1      1         0     0
+    #   3    25   0      0         0     0
+    #   4    99   1      0         0     1
+    #
+    # Explanation:
+    # - (1, 41): uid=1 is warm, but iid=41 is not warm -> warm=0, cold=0
+    # - (2, 60): uid=2 is not warm, iid=60 is not warm -> warm=0, cold=0
+    # - (3, 25): both uid and iid exist in train -> cold=0
+    # - (4, 99): uid=4 not in train and iid=99 not in train -> cold=1
     
     stats_warm = test_['warm'].value_counts(normalize=True).get(1, 0)
     stats_cold = test_['cold'].value_counts(normalize=True).get(1, 0)

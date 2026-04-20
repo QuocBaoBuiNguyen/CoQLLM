@@ -127,6 +127,21 @@ def build_ml1m(
     log_step(f"[5/10] Define temporal windows", f"train={train_slot}, valid={valid_slot}, test={test_slot}")
 
     log_step("[6/10] Create binary label", "rating >= 4 ⇒ positive=1")
+    # Example after merge and time-slot assignment:
+    #   uid  iid  rating   timestamp   title                genres                    time
+    #   1    10   5        978300760   Toy Story (1995)     Animation|Children        14
+    #   1    25   3        978302109   Jumanji (1995)       Adventure|Children        14
+    #   1    33   4        978301968   Grumpier Old Men     Comedy|Romance            24
+    #   2    18   4        978824268   Heat (1995)          Action|Crime|Thriller     14
+    #   2    41   5        978824291   Sabrina (1995)       Comedy|Romance            29
+    #
+    # After binary label transform (rating >= 4 -> 1 else 0):
+    #   uid  iid  rating  label  time
+    #   1    10   5       1      14
+    #   1    25   3       0      14
+    #   1    33   4       1      24
+    #   2    18   4       1      14
+    #   2    41   5       1      29
     rating["label"] = rating["rating"].apply(lambda x: 1 if x >= 4 else 0)
 
     label_stats = rating.label.describe()
@@ -142,6 +157,19 @@ def build_ml1m(
     rating_train = rating[rating["time"].isin(train_slot)].copy()
     rating_valid = rating[rating["time"].isin(valid_slot)].copy()
     rating_test = rating[rating["time"].isin(test_slot)].copy()
+    # Example temporal split:
+    # train_slot = [14, ..., 23], valid_slot = [24, ..., 28], test_slot = [29, ..., 33]
+    # rating_train:
+    #   uid  iid  label  time
+    #   1    10   1      14
+    #   1    25   0      14
+    #   2    18   1      14
+    # rating_valid:
+    #   uid  iid  label  time
+    #   1    33   1      24
+    # rating_test:
+    #   uid  iid  label  time
+    #   2    41   1      29
 
     log_step(
         "Split sizes",
@@ -162,15 +190,34 @@ def build_ml1m(
     rating_train["flag"] = pd.DataFrame(np.ones(rating_train.shape[0]) * -1, index=rating_train.index)
     rating_valid_f["flag"] = pd.DataFrame(np.zeros(rating_valid_f.shape[0]), index=rating_valid_f.index)
     rating_test_f["flag"] = pd.DataFrame(np.ones(rating_test_f.shape[0]), index=rating_test_f.index)
+    # Example split flag:
+    # train rows -> flag = -1
+    # valid rows -> flag = 0
+    # test rows  -> flag = 1
     log_step("[7/10] Annotate split flag", "train=-1, valid=0, test=1")
 
     data = pd.concat([rating_train, rating_valid_f, rating_test_f], axis=0, ignore_index=True)
     data = data.sort_values(by=["uid", "timestamp"])
+    # Example after concat + sort by (uid, timestamp):
+    #   uid  iid  label   timestamp   flag
+    #   1    10   1       978300760   -1
+    #   1    25   0       978302109   -1
+    #   1    33   1       978301968    0
+    #   2    18   1       978824268   -1
+    #   2    41   1       978824291    1
     log_step("[8/10] Concatenate & sort", "order by (uid, timestamp)")
 
     u_inter_all = data.groupby("uid").agg(
         {"iid": list, "label": list, "title": list, "genres": list, "timestamp": list, "flag": list}
     )
+    # Example grouped interactions by user:
+    # u_inter_all.loc[1] =
+    #   iid        [10, 25, 33]
+    #   label      [1, 0, 1]
+    #   title      ["Toy Story (1995)", "Jumanji (1995)", "Grumpier Old Men"]
+    #   genres     ["Animation|Children", "Adventure|Children", "Comedy|Romance"]
+    #   timestamp  [978300760, 978302109, 978301968]
+    #   flag       [-1, -1, 0]
     log_step("Grouped interactions", f"users={u_inter_all.shape[0]:,}")
 
     flag_values = data.flag.unique()
@@ -180,6 +227,13 @@ def build_ml1m(
     results = []
     for u in u_inter_all.index:
         results.extend(deal_with_each_u(u_inter_all.loc[u], u))
+    # Example output from deal_with_each_u(u_inter_all.loc[1], 1):
+    # [
+    #   (1, 10, 978300760, [0], [""] , "Toy Story (1995)", 1, "Animation|Children", -1),
+    #   (1, 25, 978302109, [0, 10], ["", "Toy Story (1995)"], "Jumanji (1995)", 0, "Adventure|Children", -1),
+    #   (1, 33, 978301968, [0, 10], ["", "Toy Story (1995)"], "Grumpier Old Men", 1, "Comedy|Romance", 0),
+    # ]
+    # Note: history only grows when previous label == 1.
 
     u_, i_, time_, label_, his_, his_title, title_, genres_, flag_ = [], [], [], [], [], [], [], [], []
     for re_ in results:
@@ -206,6 +260,11 @@ def build_ml1m(
             "flag": flag_,
         }
     )
+    # Example sequential dataframe before id remap:
+    #   uid  iid  label   timestamp   his        his_title                  title                genres                    flag
+    #   1    10   1       978300760   [0]        [""]                       Toy Story (1995)     Animation|Children        -1
+    #   1    25   0       978302109   [0, 10]    ["", "Toy Story (1995)"]   Jumanji (1995)       Adventure|Children        -1
+    #   1    33   1       978301968   [0, 10]    ["", "Toy Story (1995)"]   Grumpier Old Men     Comedy|Romance            0
 
     log_step("Sequential dataset", f"rows={data.shape[0]:,}")
 
@@ -219,9 +278,17 @@ def build_ml1m(
 
     data["uid"] = data["uid"].map(users_map)
     data["iid"] = data["iid"].map(items_map)
+    # Example id remap:
+    # users_map = {1: 1, 2: 2, 0: 0}
+    # items_map = {10: 1, 25: 2, 33: 3, 18: 4, 41: 5, 0: 0}
+    # before: uid=1, iid=33
+    # after : uid=1, iid=3
     log_step("[10/10] Remap ids", f"users={len(users_map)-1:,}, items={len(items_map)-1:,}")
 
     data["his"] = data["his"].apply(lambda x: [items_map[k] for k in x])
+    # Example history remap:
+    # before: his = [0, 10]
+    # after : his = [0, 1]
     hist_lens = data["his"].apply(len)
     log_step(
         "History stats",
@@ -240,6 +307,17 @@ def build_ml1m(
     train_ = data[data["flag"].isin([-1])].copy()
     valid_ = data[data["flag"].isin([0])].copy()
     test_ = data[data["flag"].isin([1])].copy()
+    # Example final split after sequential build:
+    # train_:
+    #   uid  iid  label  his       flag
+    #   1    1    1      [0]       -1
+    #   1    2    0      [0, 1]    -1
+    # valid_:
+    #   uid  iid  label  his       flag
+    #   1    3    1      [0, 1]     0
+    # test_:
+    #   uid  iid  label  his       flag
+    #   2    5    1      [0, 4]     1
 
     log_step("Final dataset shapes", f"train={len(train_):,}, valid={len(valid_):,}, test={len(test_):,}")
 
@@ -253,6 +331,12 @@ def build_ml1m(
         test_["uid"].isin(train_user) & test_["iid"].isin(train_item)
     ).astype("int")
     train_["not_cold"] = 1
+    # Example not_cold:
+    # train_user = {1, 2}
+    # train_item = {1, 2, 4}
+    # valid row (uid=1, iid=3) -> not_cold = 0 because iid=3 not in train_item
+    # test row  (uid=2, iid=5) -> not_cold = 0 because iid=5 not in train_item
+    # train rows are always not_cold = 1
     log_step(
         "Cold-start flags",
         f"valid warm={valid_['not_cold'].sum():,}, test warm={test_['not_cold'].sum():,}",
