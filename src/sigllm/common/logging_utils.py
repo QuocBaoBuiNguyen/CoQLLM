@@ -1,5 +1,19 @@
 import logging
 import sys
+from datetime import datetime, timedelta, timezone
+
+
+VN_TZ = timezone(timedelta(hours=7))
+
+
+class VietnamTimeFormatter(logging.Formatter):
+    """Formatter that renders timestamps in Vietnam time (UTC+7)."""
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=VN_TZ)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 class NotebookLogger:
     @staticmethod
@@ -19,13 +33,14 @@ class NotebookLogger:
             handler = RichHandler(
                 console=Console(file=sys.stdout, force_terminal=True),
                 markup=True,
+                show_time=False,
                 show_path=True,
                 enable_link_path=False
             )
-            formatter = logging.Formatter("%(message)s")
+            formatter = VietnamTimeFormatter("%(asctime)s | %(message)s", "%Y-%m-%d %H:%M:%S")
         except ModuleNotFoundError:
             handler = logging.StreamHandler(sys.stdout)
-            formatter = logging.Formatter("%(asctime)s | %(message)s", "%H:%M:%S")
+            formatter = VietnamTimeFormatter("%(asctime)s | %(message)s", "%Y-%m-%d %H:%M:%S")
 
         handler.setFormatter(formatter)
         logger.addHandler(handler)
