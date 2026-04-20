@@ -8,6 +8,7 @@ from pathlib import Path
 import omegaconf
 import os
 import numpy as np
+from typing import Optional
 
 from sigllm.common import NotebookLogger, EarlyStopping
 from sigllm.common.config import Config
