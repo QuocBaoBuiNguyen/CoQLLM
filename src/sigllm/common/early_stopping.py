@@ -1,8 +1,9 @@
 class EarlyStopping:
-    def __init__(self, ref_metric='valid_auc', monitor_mode='max', patience=20):
+    def __init__(self, ref_metric='valid_auc', monitor_mode='max', patience=20, min_delta=0.0):
         self.ref_metric = ref_metric
         self.mode = monitor_mode
         self.patience = patience
+        self.min_delta = min_delta
  
         self.best_metric_val = float('-inf') if monitor_mode == 'max' else float('inf')
         self.best_full_metric = None
@@ -12,7 +13,10 @@ class EarlyStopping:
     def update(self, metrics):
         current_val = metrics[self.ref_metric]
 
-        is_improved = (current_val > self.best_metric_val) if self.mode == 'max' else (current_val < self.best_metric_val)
+        if self.mode == 'max':
+            is_improved = current_val > (self.best_metric_val + self.min_delta)
+        else:
+            is_improved = current_val < (self.best_metric_val - self.min_delta)
 
         if is_improved:
             self.best_metric_val = current_val

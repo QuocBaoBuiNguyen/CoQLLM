@@ -1,4 +1,5 @@
 import argparse
+import random
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -6,7 +7,9 @@ from torch.optim import Adam
 from pathlib import Path
 import omegaconf
 import os
+import numpy as np
 
+from sigllm.common import NotebookLogger, EarlyStopping
 from sigllm.common.config import Config
 from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
@@ -16,6 +19,21 @@ from sigllm.models.q_former.text_encoder import TextEncoder
 from sigllm.models.projection.qformer_alignment_model import QRecInstructAlignmentModel
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+LOGGER = NotebookLogger.rich_logger("sigllm.train_qformer_stage1")
+
+
+def log_step(title: str, detail: str | None = None) -> None:
+    message = title if detail is None else f"{title} | {detail}"
+    LOGGER.info(message)
+
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
@@ -287,7 +305,7 @@ def _load_checkpoint(checkpoint_path, model, optimizer=None):
 
 
 def train_qformer_stage1_representation(cfg):
-
+    set_seed(int(cfg.seed))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "train_qformer_ood2.pkl"), shuffle=True)
@@ -304,9 +322,13 @@ def train_qformer_stage1_representation(cfg):
     outdir = cfg.output_dir
     os.makedirs(outdir, exist_ok=True)
     best_checkpoint_path = os.path.join(outdir, cfg.best_checkpoint_name)
-    best_val_loss = float("inf")
-    best_epoch = -1
-    early_stop_counter = 0
+    stopper = EarlyStopping(
+        ref_metric="val_loss",
+        monitor_mode="min",
+        patience=cfg.early_stopping_patience,
+        min_delta=cfg.early_stopping_min_delta,
+    )
+    log_step("Training setup", f"seed={cfg.seed}, output_dir={outdir}")
 
     for epoch in range(cfg.epoch):
         model.train()
@@ -320,6 +342,7 @@ def train_qformer_stage1_representation(cfg):
             batch["u"] = batch["u"].to(device)
             batch["i_pos"] = batch["i_pos"].to(device)
             batch["i_negs"] = batch["i_negs"].to(device)
+            opt.zero_grad()
 
             loss, logs = train_step(
                 batch,
@@ -332,7 +355,6 @@ def train_qformer_stage1_representation(cfg):
             )
             loss.backward()
             opt.step()
-            opt.zero_grad()
             
             train_loss += loss.item()
             train_lui += logs["L_ui"].item()
@@ -364,10 +386,22 @@ def train_qformer_stage1_representation(cfg):
                 f"w_it={cfg.w_it:.3f} tau_ui={cfg.tau_ui:.3f} tau_it={cfg.tau_it:.3f}"
             )
 
-            if val_loss < best_val_loss - cfg.early_stopping_min_delta:
-                best_val_loss = val_loss
-                best_epoch = epoch + 1
-                early_stop_counter = 0
+            metrics = {
+                "epoch": epoch + 1,
+                "val_loss": val_loss,
+                "val_lui": val_lui,
+                "val_lit": val_lit,
+                "val_ui_top1": val_ui_top1,
+                "val_it_top1": val_it_top1,
+                "train_loss": avg_train_loss,
+                "train_lui": avg_train_lui,
+                "train_lit": avg_train_lit,
+                "train_ui_top1": avg_train_ui_top1,
+                "train_it_top1": avg_train_it_top1,
+            }
+            improved = stopper.update(metrics)
+
+            if improved:
                 _save_checkpoint(
                     best_checkpoint_path,
                     model,
@@ -379,32 +413,37 @@ def train_qformer_stage1_representation(cfg):
                     val_ui_top1,
                     val_it_top1,
                 )
-                print(f"Saved new best checkpoint at epoch {best_epoch} -> {best_checkpoint_path}")
+                log_step("Saved new best checkpoint", f"epoch={epoch + 1}, path={best_checkpoint_path}")
             else:
-                early_stop_counter += 1
-                print(
-                    f"No val improvement for {early_stop_counter} epoch(s). "
-                    f"Best Val Loss={best_val_loss:.4f} at epoch {best_epoch}"
+                best_epoch = stopper.best_full_metric["epoch"] if stopper.best_full_metric is not None else "n/a"
+                best_val_loss = stopper.best_metric_val
+                log_step(
+                    "No validation improvement",
+                    f"counter={stopper.counter}, best_epoch={best_epoch}, best_val_loss={best_val_loss:.4f}",
                 )
 
-            if early_stop_counter >= cfg.early_stopping_patience:
-                print(
-                    f"Early stopping triggered at epoch {epoch+1}. "
-                    f"Best epoch={best_epoch} Best Val Loss={best_val_loss:.4f}"
+            if stopper.should_stop:
+                best_epoch = stopper.best_full_metric["epoch"] if stopper.best_full_metric is not None else "n/a"
+                best_val_loss = stopper.best_metric_val
+                log_step(
+                    "Early stopping triggered",
+                    f"epoch={epoch + 1}, best_epoch={best_epoch}, best_val_loss={best_val_loss:.4f}",
                 )
                 break
 
     if os.path.exists(best_checkpoint_path):
         best_checkpoint = _load_checkpoint(best_checkpoint_path, model)
-        print(
-            f"Loaded best checkpoint from epoch {best_checkpoint['epoch']} "
-            f"with Val Loss={best_checkpoint['val_loss']:.4f} "
-            f"UI@1={best_checkpoint.get('val_ui_top1', 0.0):.4f} "
-            f"IT@1={best_checkpoint.get('val_it_top1', 0.0):.4f}"
+        log_step(
+            "Loaded best checkpoint",
+            (
+                f"epoch={best_checkpoint['epoch']}, val_loss={best_checkpoint['val_loss']:.4f}, "
+                f"ui_top1={best_checkpoint.get('val_ui_top1', 0.0):.4f}, "
+                f"it_top1={best_checkpoint.get('val_it_top1', 0.0):.4f}"
+            ),
         )
 
     # Final Test
-    print("Evaluating on Test Set...")
+    log_step("Evaluating on Test Set")
     test_loss, test_lui, test_lit, test_ui_top1, test_it_top1 = evaluate_loss(
         model,
         test_loader,
@@ -413,9 +452,9 @@ def train_qformer_stage1_representation(cfg):
         tau_ui=cfg.tau_ui,
         tau_it=cfg.tau_it,
     )
-    print(
-        f"Test Results: Loss={test_loss:.4f} L_ui={test_lui:.4f} L_it={test_lit:.4f} "
-        f"UI@1={test_ui_top1:.4f} IT@1={test_it_top1:.4f}"
+    log_step(
+        "Test results",
+        f"loss={test_loss:.4f}, l_ui={test_lui:.4f}, l_it={test_lit:.4f}, ui@1={test_ui_top1:.4f}, it@1={test_it_top1:.4f}",
     )
 
     torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1.pth"))
@@ -461,6 +500,7 @@ def main():
         "freeze_rec",
         "freeze_text_encoder",
         "output_dir",
+        "seed",
     ]
     missing_keys = [key for key in required_keys if key not in stage1_cfg]
     if missing_keys:
