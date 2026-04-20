@@ -41,22 +41,58 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
         py_rng = random.Random(seed)
         np_rng = np.random.default_rng(seed)
 
+        # Raw sequential dataframe after preprocessing and sorted by uid/timestamp:
+        #   idx  uid  iid  label  his          title              genres
+        #   0    1    10   1      [0]          Toy Story          Animation|Children
+        #   1    1    25   0      [0, 10]      Jumanji            Adventure|Children
+        #   2    1    33   1      [0, 10]      Grumpier Old Men   Comedy|Romance
+        #   3    2    18   1      [0]          Heat               Action|Crime|Thriller
+        #   4    2    41   1      [0, 18]      Sabrina            Comedy|Romance
+        #   5    2    52   0      [0, 18, 41]  Tom and Huck       Adventure|Children
+        #   6    3    60   1      [0]          GoldenEye          Action|Adventure|Thriller
         df = pd.read_pickle(input_pkl_path).reset_index(drop=True)
+
+        # Keep only positive rows:
+        #   idx  uid  iid  label
+        #   0    1    10   1
+        #   2    1    33   1
+        #   3    2    18   1
+        #   4    2    41   1
+        #   6    3    60   1
         pos_df = df[df["label"] == 1]
         if pos_df.empty:
             raise ValueError("No positive samples found.")
 
+        # Group positive row indices by user:
+        # user_pos_indices = {1: [0, 2], 2: [3, 4], 3: [6]}
+        # users = [1, 2, 3]
         user_pos_indices = pos_df.groupby("uid").apply(lambda x: x.index.tolist()).to_dict()
         users = list(user_pos_indices.keys())
+
+        # Build item universe and each user's positive items:
+        # all_items = {10, 18, 25, 33, 41, 52, 60}
+        # user_pos_items = {1: {10, 33}, 2: {18, 41}, 3: {60}}
         all_items = set(df["iid"].unique().tolist())
         user_pos_items = pos_df.groupby("uid")["iid"].apply(set).to_dict()
 
+        # Build iid -> genre-set map from the raw dataframe:
+        # item_genres = {
+        #   10: {"Animation", "Children"},
+        #   25: {"Adventure", "Children"},
+        #   33: {"Comedy", "Romance"},
+        #   18: {"Action", "Crime", "Thriller"},
+        #   41: {"Comedy", "Romance"},
+        #   52: {"Adventure", "Children"},
+        #   60: {"Action", "Adventure", "Thriller"},
+        # }
         item_genres = {}
         for iid, genres in df[["iid", "genres"]].drop_duplicates().itertuples(index=False):
             gset = {g for g in str(genres).split("|") if g}
             if gset:
                 item_genres[int(iid)] = gset
 
+        # Keep only positive rows whose iid has usable genres:
+        # user_pos_indices_genre = {1: [0, 2], 2: [3, 4], 3: [6]}
         user_pos_indices_genre = {}
         for uid, indices in user_pos_indices.items():
             with_genre = [idx for idx in indices if int(df.iloc[idx]["iid"]) in item_genres]
@@ -69,6 +105,13 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
             return np_rng.choice(pool, size=size, replace=replace)
 
         def sample_fixed(user: int):
+            # Example for sample_fixed(user=1):
+            # pick idx=2 -> pos_item=33, his=[0, 10]
+            # banned_items = {0, 10, 33}
+            # candidate_pool = {18, 25, 41, 52, 60}
+            # neg_items is sampled from candidate_pool
+            # instruction ~ one template from TEMPL_FIXED
+            # item_text = "Title: Grumpier Old Men"
             pos_indices = user_pos_indices[user]
             pos_row = df.iloc[py_rng.choice(pos_indices)]
             pos_item = int(pos_row["iid"])
@@ -83,6 +126,16 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
             return pos_item, neg_items, instruction, item_text
 
         def sample_genre(user: int):
+            # Example for sample_genre(user=2):
+            # Example random choose seed row idx=4 -> seed_item=41 -> choose genre="Comedy"
+            # user_pos_in_genre = [4] because iid=41 has Comedy, iid=18 does not
+            # chosen_idx=4 -> pos_item=41, his=[0, 18]
+            # banned_items = {0, 18, 41}
+            # hard_pool = {18} because iid=18 is a positive item of user 2 but does not have "Comedy"
+            # candidate_pool = {10, 25, 33, 52, 60}
+            # neg_items = hard negatives from hard_pool + random negatives from candidate_pool
+            # instruction = e.g. "Considering only the Comedy genre, predict whether the user will like this movie. Answer Yes/No."
+            # item_text = "Title: Sabrina"
             if user not in user_pos_indices_genre:
                 return None
             pos_idx = py_rng.choice(user_pos_indices_genre[user])
