@@ -49,7 +49,21 @@ def build_ml1m(
 ) -> tuple:
     """
     Build ML-1M sequential dataset.
-    
+
+    Output sample:
+    uid  iid  label   timestamp   his        his_title                  title                genres                    flag
+    1    10   1       978300760   [0]        [""]                       Toy Story (1995)     Animation|Children        -1
+    1    25   0       978302109   [0, 10]    ["", "Toy Story (1995)"]   Jumanji (1995)       Adventure|Children        -1
+    1    33   1       978301968   [0, 10]    ["", "Toy Story (1995)"]   Grumpier Old Men     Comedy|Romance            0
+
+    Columns: uid, iid, label, timestamp, his, his_title, title, genres, flag
+    Saved files in out_dir:
+    - train_ood2.pkl: rows with flag = -1
+    - valid_ood2.pkl: rows with flag = 0
+    - test_ood2.pkl: rows with flag = 1
+    - valid_small_ood2.pkl: 50% sample from valid_ood2.pkl
+    - users_map.pkl / items_map.pkl: id remapping dictionaries
+
     Returns: (train_df, valid_df, test_df, users_map, items_map)
     """
     if train_slot is None:
@@ -244,7 +258,6 @@ def build_ml1m(
         f"valid warm={valid_['not_cold'].sum():,}, test warm={test_['not_cold'].sum():,}",
     )
 
-    # Persist processed artifacts
     os.makedirs(out_dir, exist_ok=True)
     train_path = os.path.join(out_dir, "train_ood2.pkl")
     valid_path = os.path.join(out_dir, "valid_ood2.pkl")
