@@ -23,7 +23,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 LOGGER = NotebookLogger.rich_logger("sigllm.train_qformer_stage1")
 
 
-def log_step(title: str, detail: str | None = None) -> None:
+def log_step(title: str, detail: Optional[str] = None) -> None:
     message = title if detail is None else f"{title} | {detail}"
     LOGGER.info(message)
 
