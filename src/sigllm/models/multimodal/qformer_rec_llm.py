@@ -66,6 +66,7 @@ class QRecLLM(Rec2Base):
         rec_model="MF",
         rec_config=None,
         pretrained_rec=None,
+        pretrained_qformer=None,
         freeze_rec=True,
         rec_precision='fp16',
         llama_model="",
@@ -103,7 +104,7 @@ class QRecLLM(Rec2Base):
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model, low_resource, device_8bit)
         self.text_encoder, d_model = self._init_text_encoder(freeze_text_encoder=True)
-        self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, pretrained_qformer="/content/SigLLM/ckpt/qformer_stage1/qformer_stage1_best.pth", freeze_qformer=False)
+        self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, pretrained_qformer=pretrained_qformer, freeze_qformer=False)
         self._init_projection(proj_mid, proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
 
@@ -702,6 +703,7 @@ class QRecLLM(Rec2Base):
         freeze_rec = cfg.get("freeze_rec",True)
         rec_precision = cfg.get("rec_precision", 'fp16')
         rec_config = cfg.get("rec_config")
+        qformer_config = cfg.get("qformer_config")
         lora_config = cfg.get("lora_config")
         llama_model = cfg.get("llama_model")
         proj_token_num = cfg.get("proj_token_num")
@@ -715,11 +717,16 @@ class QRecLLM(Rec2Base):
         prompt_template = cfg.get("prompt_template", "")
         max_txt_len = cfg.get("max_txt_len", 32)
         end_sym = cfg.get("end_sym", '\n')
+        num_queries = qformer_config.get("num_queries", 8) if qformer_config is not None else 8
+        num_heads = qformer_config.get("num_heads", 8) if qformer_config is not None else 8
+        num_layers = qformer_config.get("num_layers", 2) if qformer_config is not None else 2
+        pretrained_qformer = qformer_config.get("qformer_ckpt") if qformer_config is not None else None
 
         model = cls(
             rec_model=rec_model,
             rec_config=rec_config,
-            pretrained_rec = rec_config['pretrained_path'],
+            pretrained_rec=rec_config['pretrained_path'],
+            pretrained_qformer=pretrained_qformer,
             freeze_rec=freeze_rec,
             rec_precision=rec_precision,
             llama_model=llama_model,
@@ -729,10 +736,13 @@ class QRecLLM(Rec2Base):
             end_sym=end_sym,
             low_resource=low_resource,
             device_8bit=device_8bit,
-            proj_token_num = proj_token_num,
-            proj_drop = proj_drop,
-            lora_config = lora_config,
-            proj_mid = proj_mid,
+            proj_token_num=proj_token_num,
+            proj_drop=proj_drop,
+            num_queries=num_queries,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            lora_config=lora_config,
+            proj_mid=proj_mid,
             freeze_lora=freeze_lora,
             freeze_proj=freeze_proj
         )

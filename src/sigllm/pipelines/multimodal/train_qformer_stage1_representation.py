@@ -440,7 +440,8 @@ def train_qformer_stage1_representation(cfg):
                 )
                 break
 
-    if os.path.exists(best_checkpoint_path):
+    best_checkpoint = None
+    if stopper.best_full_metric is not None and os.path.exists(best_checkpoint_path):
         best_checkpoint = _load_checkpoint(best_checkpoint_path, model)
         log_step(
             "Loaded best checkpoint",
@@ -466,9 +467,15 @@ def train_qformer_stage1_representation(cfg):
         f"loss={test_loss:.4f}, l_ui={test_lui:.4f}, l_it={test_lit:.4f}, ui@1={test_ui_top1:.4f}, it@1={test_it_top1:.4f}",
     )
 
-    torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1.pth"))
-    if os.path.exists(best_checkpoint_path):
-        torch.save(model.qformer.state_dict(), os.path.join(outdir, "qformer_stage1_best.pth"))
+    if best_checkpoint is not None:
+        best_qformer_path = os.path.join(outdir, cfg.best_qformer_weights_name)
+        torch.save(model.qformer.state_dict(), best_qformer_path)
+        log_step(
+            "Exported best QFormer weights for stage2",
+            f"path={best_qformer_path}, epoch={best_checkpoint['epoch']}, val_loss={best_checkpoint['val_loss']:.4f}",
+        )
+    else:
+        log_step("Skipped best QFormer export", "No best checkpoint was selected during training")
     
     return model
 
@@ -503,6 +510,7 @@ def main():
         "early_stopping_patience",
         "early_stopping_min_delta",
         "best_checkpoint_name",
+        "best_qformer_weights_name",
         "log_epoch",
         "epoch",
         "text_model_name",

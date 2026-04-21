@@ -30,7 +30,7 @@ model:
 
   qformer_config:
     use_qformer: True
-    qformer_ckpt: "/content/SigLLM/ckpt/qformer_stage1/qformer_stage1_best.pth" # Path from stage 1
+    qformer_ckpt: "${run.qformer_stage1.output_dir}${run.qformer_stage1.best_qformer_weights_name}" # Exported best QFormer weights from stage 1 for stage 2
     qformer_d_model: 768
     num_queries: 8
     num_heads: 8
@@ -92,7 +92,8 @@ run:
     debug_batch_max_steps: 10
     early_stopping_patience: 10
     early_stopping_min_delta: 1e-4
-    best_checkpoint_name: "best_qformer_stage1.pt"
+    best_checkpoint_name: "qformer_stage1_best_full.pt"
+    best_qformer_weights_name: "qformer_stage1_best_qformer.pth"
     log_epoch: 1
     epoch: 100
     text_model_name: "bert-base-uncased"
