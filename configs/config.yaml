@@ -112,7 +112,7 @@ run:
   
   # Training Schedule
   max_epoch: 200
-  iters_per_epoch: 50
+  iters_per_epoch: 400
   batch_size_train: 16
   batch_size_eval: 64
   num_workers: 4
