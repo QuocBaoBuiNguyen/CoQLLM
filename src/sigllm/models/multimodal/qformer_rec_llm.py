@@ -93,6 +93,7 @@ class QRecLLM(Rec2Base):
         self._has_logged_trainable_stats = False
         self._flow_log_steps = 0
         self._max_flow_log_steps = 3
+        self._has_logged_prompt_injection_stats = False
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -553,6 +554,31 @@ class QRecLLM(Rec2Base):
 
         elif "<DCNFeature>" in prompt_ori:
             raise NotImplementedError("<DCNFeature> is not implemented in this version")
+
+        if not self._has_logged_prompt_injection_stats:
+            valid_history_items = 0
+            if 'InteractedItemIDs_pad' in batch_data:
+                valid_history_items = int(
+                    (batch_data['InteractedItemIDs_pad'][0] != self.rec_encoder.padding_index).sum().item()
+                )
+
+            user_soft_tokens = self.proj_token_num if "<UserID>" in prompt_ori else 0
+            target_soft_tokens = self.proj_token_num if "<TargetItemID>" in prompt_ori else 0
+            history_soft_tokens = valid_history_items * self.proj_token_num if "<ItemIDList>" in prompt_ori else 0
+            total_soft_tokens = user_soft_tokens + target_soft_tokens + history_soft_tokens
+
+            log_step(
+                "Prompt injection stats",
+                (
+                    f"valid_history_items={valid_history_items}, "
+                    f"user_soft_tokens={user_soft_tokens}, "
+                    f"history_soft_tokens={history_soft_tokens}, "
+                    f"target_soft_tokens={target_soft_tokens}, "
+                    f"total_soft_tokens={total_soft_tokens}, "
+                    f"replaced_positions={replaced_idx.shape[0]}"
+                ),
+            )
+            self._has_logged_prompt_injection_stats = True
 
         return inputs_embeds, prompts_tokens.attention_mask
 
