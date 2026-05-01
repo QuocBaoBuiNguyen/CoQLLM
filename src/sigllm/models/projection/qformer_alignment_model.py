@@ -12,7 +12,8 @@ class QRecInstructAlignmentModel(nn.Module):
         self.text_encoder = text_encoder
 
         d = text_encoder.model.config.hidden_size
-        self.p_user = nn.Linear(d, d)
+        # TEMP_DISABLED_USER_CF: user CF is not part of the temporary QFormer/LLM path.
+        # self.p_user = nn.Linear(d, d)
         self.p_item = nn.Linear(d, d)
         self.p_text = nn.Linear(d, d)
 
@@ -28,9 +29,11 @@ class QRecInstructAlignmentModel(nn.Module):
         return self.p_text(pooled)
 
     def enc_user(self, u_ids, ins_tok_emb):
-        u_cf = self.mf.user_encoder(u_ids)
-        u_q = self.qformer(u_cf, ins_tok_emb)
-        return self.p_user(self.pool_queries(u_q))
+        # TEMP_DISABLED_USER_CF: old stage-1 path encoded the user CF vector.
+        # u_cf = self.mf.user_encoder(u_ids)
+        # u_q = self.qformer(u_cf, ins_tok_emb)
+        # return self.p_user(self.pool_queries(u_q))
+        raise RuntimeError("User CF encoding is temporarily disabled.")
 
     def enc_item(self, i_ids, ins_tok_emb):
         i_cf = self.mf.item_encoder(i_ids)
@@ -40,7 +43,9 @@ class QRecInstructAlignmentModel(nn.Module):
     def forward(self, u_idx: torch.Tensor, i_idx: torch.Tensor, ins_list: list[str], text_list: list[str]):
         device = u_idx.device
         ins_tok_emb = self.ins_tokens(ins_list, device)
-        user_z = self.enc_user(u_idx, ins_tok_emb)
+        # TEMP_DISABLED_USER_CF: keep old call nearby for easy rollback.
+        # user_z = self.enc_user(u_idx, ins_tok_emb)
+        user_z = None
         item_z = self.enc_item(i_idx, ins_tok_emb)
         text_z = self.text_vec(text_list, device)
         return {"user": user_z, "item": item_z, "text": text_z}
