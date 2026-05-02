@@ -251,7 +251,7 @@ def train_step(
     # TEMP_DISABLED_USER_CF: skip user-item loss because it depends on user CF.
     # L_ui = model.loss_user_item(u_vec, i_pos_vec, i_neg_vecs, tau=tau_ui)
     L_ui = i_pos_vec.new_zeros(())
-    L_it = model.loss_item_text(i_pos_vec, t_vec, tau=tau_it)
+    L_it = model.loss_item_text_symmetric(i_pos_vec, t_vec, tau=tau_it)
     # metrics = _compute_alignment_metrics(u_vec, i_pos_vec, i_neg_vecs, t_vec, tau_ui, tau_it)
     metrics = _compute_item_text_metrics(i_pos_vec, t_vec, tau_it)
 

@@ -111,3 +111,18 @@ class QRecInstructAlignmentModel(nn.Module):
         logits = (i @ t.T) / tau
         labels = torch.arange(i.size(0), device=i.device)
         return F.cross_entropy(logits, labels)
+
+    @staticmethod
+    def loss_item_text_symmetric(i_vec: torch.Tensor, t_vec: torch.Tensor, tau: float = 0.07):
+        if i_vec.dim() == 3:
+            i_vec, _ = QRecInstructAlignmentModel.select_query_by_text(i_vec, t_vec)
+
+        i = QRecInstructAlignmentModel.l2norm(i_vec)
+        t = QRecInstructAlignmentModel.l2norm(t_vec)
+
+        logits = (i @ t.T) / tau
+        labels = torch.arange(i.size(0), device=i.device)
+
+        loss_i2t = F.cross_entropy(logits, labels)
+        loss_t2i = F.cross_entropy(logits.T, labels)
+        return (loss_i2t + loss_t2i) / 2
