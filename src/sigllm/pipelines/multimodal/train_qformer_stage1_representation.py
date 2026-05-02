@@ -197,7 +197,8 @@ def _compute_alignment_metrics(u_vec, i_pos_vec, i_neg_vecs, t_vec, tau_ui: floa
 
 def _compute_item_text_metrics(i_pos_vec, t_vec, tau_it: float):
     """Compute Top-1 accuracy for the temporary item-text-only stage-1 objective."""
-    pos = QRecInstructAlignmentModel.l2norm(i_pos_vec)
+    pos_selected, _ = QRecInstructAlignmentModel.select_query_by_text(i_pos_vec, t_vec)
+    pos = QRecInstructAlignmentModel.l2norm(pos_selected)
     text = QRecInstructAlignmentModel.l2norm(t_vec)
 
     it_logits = (pos @ text.T) / tau_it
@@ -215,7 +216,7 @@ def train_step(
     batch,
     model: QRecInstructAlignmentModel,
     w_ui: float = 1.0,
-    w_it: float = 0.5,
+    w_it: float = 1.0,
     tau_ui: float = 0.07,
     tau_it: float = 0.2,
     debug_batch: bool = False,
@@ -261,7 +262,7 @@ def train_step(
 
 
 
-def evaluate_loss(model, loader, w_ui=1.0, w_it=0.5, tau_ui=0.07, tau_it=0.2):
+def evaluate_loss(model, loader, w_ui=1.0, w_it=1.0, tau_ui=0.07, tau_it=0.2):
     """
     Evaluates the model on a given dataloader.
     Returns average loss, L_ui, and L_it.

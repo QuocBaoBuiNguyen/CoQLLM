@@ -18,6 +18,7 @@ class QRecInstructAlignmentModel(nn.Module):
         self.p_text = nn.Linear(d, d)
 
     def pool_queries(self, q_tokens: torch.Tensor) -> torch.Tensor:
+        # Kept only for the old pooled-QFormer path. Do not use in the ILM-style path.
         return q_tokens.mean(dim=1)
 
     def ins_tokens(self, ins_list, device):
@@ -38,7 +39,9 @@ class QRecInstructAlignmentModel(nn.Module):
     def enc_item(self, i_ids, ins_tok_emb):
         i_cf = self.mf.item_encoder(i_ids)
         i_q = self.qformer(i_cf, ins_tok_emb)
-        return self.p_item(self.pool_queries(i_q))
+        # Old path pooled all Q-Former query tokens into one vector too early:
+        # return self.p_item(self.pool_queries(i_q))
+        return self.p_item(i_q)
 
     def forward(self, u_idx: torch.Tensor, i_idx: torch.Tensor, ins_list: list[str], text_list: list[str]):
         device = u_idx.device
@@ -55,6 +58,37 @@ class QRecInstructAlignmentModel(nn.Module):
         return x / (x.norm(dim=-1, keepdim=True) + 1e-12)
 
     @staticmethod
+    def select_query_by_text(q_tokens: torch.Tensor, text_vec: torch.Tensor):
+        """
+        Select the query token nearest to the matching text CLS vector.
+
+        Args:
+            q_tokens: item query tokens with shape [B, Q, D]
+            text_vec: matching text vectors with shape [B, D]
+
+        Returns:
+            selected_queries: [B, D]
+            selected_indices: [B]
+        """
+        if q_tokens.dim() != 3:
+            raise ValueError(f"Expected q_tokens shape [B, Q, D], got {tuple(q_tokens.shape)}")
+        if text_vec.dim() != 2:
+            raise ValueError(f"Expected text_vec shape [B, D], got {tuple(text_vec.shape)}")
+        if q_tokens.size(0) != text_vec.size(0) or q_tokens.size(-1) != text_vec.size(-1):
+            raise ValueError(
+                "Shape mismatch between q_tokens and text_vec: "
+                f"q_tokens={tuple(q_tokens.shape)}, text_vec={tuple(text_vec.shape)}"
+            )
+
+        q_norm = QRecInstructAlignmentModel.l2norm(q_tokens)
+        text_norm = QRecInstructAlignmentModel.l2norm(text_vec)
+        scores = torch.einsum("bqd,bd->bq", q_norm, text_norm)
+        selected_indices = scores.argmax(dim=1)
+        batch_indices = torch.arange(q_tokens.size(0), device=q_tokens.device)
+        selected_queries = q_tokens[batch_indices, selected_indices]
+        return selected_queries, selected_indices
+
+    @staticmethod
     def loss_user_item(u_vec: torch.Tensor, i_pos_vec: torch.Tensor, i_neg_vecs: torch.Tensor, tau: float = 0.07):
         u = QRecInstructAlignmentModel.l2norm(u_vec)
         pos = QRecInstructAlignmentModel.l2norm(i_pos_vec)
@@ -68,8 +102,11 @@ class QRecInstructAlignmentModel(nn.Module):
         return F.cross_entropy(logits, labels)
 
     @staticmethod
-    def loss_item_text(i_vec: torch.Tensor, t_vec: torch.Tensor, tau: float = 0.07):
-        i = QRecInstructAlignmentModel.l2norm(i_vec)
+    def loss_item_text(i_q_tokens: torch.Tensor, t_vec: torch.Tensor, tau: float = 0.07):
+        # ILM-style: keep all query outputs until the item-text loss, then select
+        # the query nearest to the matching text CLS vector.
+        i_selected, _ = QRecInstructAlignmentModel.select_query_by_text(i_q_tokens, t_vec)
+        i = QRecInstructAlignmentModel.l2norm(i_selected)
         t = QRecInstructAlignmentModel.l2norm(t_vec)
         logits = (i @ t.T) / tau
         labels = torch.arange(i.size(0), device=i.device)
