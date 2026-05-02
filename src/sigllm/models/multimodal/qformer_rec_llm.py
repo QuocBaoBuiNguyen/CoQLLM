@@ -545,7 +545,19 @@ class QRecLLM(Rec2Base):
             prompt_list.append(current_prompt)
         
         if not self.has_print_prompt:
-            log_step("prompt example:", prompt_list[0])
+            preview_parts = []
+            if "<ItemIDList>" in prompt_ori and 'InteractedItemIDs_pad' in batch_data:
+                history_ids = batch_data['InteractedItemIDs_pad'][0].detach().cpu().tolist()
+                history_ids = [int(i) for i in history_ids if int(i) != self.rec_encoder.padding_index]
+                preview_parts.append(
+                    f"[ItemIDList ids={history_ids} soft_tokens={len(history_ids) * self.proj_token_num}]",
+                )
+            if "<TargetItemID>" in prompt_ori and 'TargetItemID' in batch_data:
+                target_id = int(batch_data['TargetItemID'][0].detach().cpu().item())
+                preview_parts.append(
+                    f"[TargetItemID id={target_id} soft_tokens={self.proj_token_num}]",
+                )
+            log_step("prompt injection preview:", " | ".join(preview_parts))
             self.has_print_prompt = True
 
         self.llama_tokenizer.padding_side = "left"
@@ -588,22 +600,20 @@ class QRecLLM(Rec2Base):
                     (batch_data['InteractedItemIDs_pad'][0] != self.rec_encoder.padding_index).sum().item()
                 )
 
-            # TEMP_DISABLED_USER_CF: old value was self.proj_token_num when "<UserID>" was present.
-            # user_soft_tokens = self.proj_token_num if "<UserID>" in prompt_ori else 0
-            user_soft_tokens = 0
             target_soft_tokens = self.proj_token_num if "<TargetItemID>" in prompt_ori else 0
             history_soft_tokens = valid_history_items * self.proj_token_num if "<ItemIDList>" in prompt_ori else 0
-            total_soft_tokens = user_soft_tokens + target_soft_tokens + history_soft_tokens
+            total_soft_tokens = target_soft_tokens + history_soft_tokens
+            sample_unk_slots = int((prompts_tokens.input_ids[0] == unk_token_id).sum().item())
 
             log_step(
                 "Prompt injection stats",
                 (
                     f"valid_history_items={valid_history_items}, "
-                    f"user_soft_tokens={user_soft_tokens}, "
                     f"history_soft_tokens={history_soft_tokens}, "
                     f"target_soft_tokens={target_soft_tokens}, "
-                    f"total_soft_tokens={total_soft_tokens}, "
-                    f"replaced_positions={replaced_idx.shape[0]}"
+                    f"sample_soft_tokens={total_soft_tokens}, "
+                    f"sample_unk_slots={sample_unk_slots}, "
+                    f"batch_unk_slots={replaced_idx.shape[0]}"
                 ),
             )
             self._has_logged_prompt_injection_stats = True
