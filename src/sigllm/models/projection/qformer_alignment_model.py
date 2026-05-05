@@ -12,8 +12,6 @@ class QRecInstructAlignmentModel(nn.Module):
         self.text_encoder = text_encoder
 
         d = text_encoder.model.config.hidden_size
-        self.p_user = nn.Linear(d, d)
-        self.p_item = nn.Linear(d, d)
         self.p_text = nn.Linear(d, d)
 
     def pool_queries(self, q_tokens: torch.Tensor) -> torch.Tensor:
@@ -29,13 +27,11 @@ class QRecInstructAlignmentModel(nn.Module):
 
     def enc_user(self, u_ids, ins_tok_emb):
         u_cf = self.mf.user_encoder(u_ids)
-        u_q = self.qformer(u_cf, ins_tok_emb)
-        return self.p_user(u_q)
+        return self.qformer(u_cf, ins_tok_emb)
 
     def enc_item(self, i_ids, ins_tok_emb):
         i_cf = self.mf.item_encoder(i_ids)
-        i_q = self.qformer(i_cf, ins_tok_emb)
-        return self.p_item(i_q)
+        return self.qformer(i_cf, ins_tok_emb)
 
     def forward(self, u_idx: torch.Tensor, i_idx: torch.Tensor, ins_list: list[str], text_list: list[str]):
         device = u_idx.device
