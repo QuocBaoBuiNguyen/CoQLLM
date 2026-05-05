@@ -1,10 +1,8 @@
 import argparse
 import random
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
-from pathlib import Path
 import omegaconf
 import os
 import numpy as np
@@ -87,11 +85,6 @@ def _init_dataset(cfg, filename: str, shuffle: bool = True):
     """
     Initializes the dataset and dataloader.
     """
-    dataset_cfg = omegaconf.OmegaConf.create({
-        "build_info": {
-            "storage": Path(cfg.data_dir)
-        }
-    })
     dataset = QFormerAlignmentDataset(filename=filename)
     loader = DataLoader(
         dataset, 
@@ -150,49 +143,23 @@ def _init_optimizer(model, lr, weight_decay=0.0):
     )
 
 
-def _log_batch_preview(batch, prefix: str = "train_step", max_neg_preview: int = 5):
+def _log_batch_preview(batch, prefix: str = "train_step"):
     """Print a compact preview of the current batch for debugging."""
-    batch_size = batch["u"].size(0)
-    neg_count = batch["i_negs"].size(1) if batch["i_negs"].dim() > 1 else 0
-    first_negatives = batch["i_negs"][0, :max_neg_preview].tolist() if batch_size > 0 else []
+    batch_size = batch["i_left"].size(0)
+    type_counts = {sample_type: batch["sample_type"].count(sample_type) for sample_type in set(batch["sample_type"])}
 
     print(
-        f"[{prefix}] batch_size={batch_size} neg_k={neg_count} "
-        f"u.shape={tuple(batch['u'].shape)} i_pos.shape={tuple(batch['i_pos'].shape)} "
-        f"i_negs.shape={tuple(batch['i_negs'].shape)}"
+        f"[{prefix}] batch_size={batch_size} type_counts={type_counts} "
+        f"u.shape={tuple(batch['u'].shape)} i_left.shape={tuple(batch['i_left'].shape)} "
+        f"i_right.shape={tuple(batch['i_right'].shape)}"
     )
     if batch_size > 0:
         print(
-            f"[{prefix}] sample[0] u={batch['u'][0].item()} i_pos={batch['i_pos'][0].item()} "
-            f"i_negs[:{max_neg_preview}]={first_negatives}"
+            f"[{prefix}] sample[0] type={batch['sample_type'][0]} u={batch['u'][0].item()} "
+            f"i_left={batch['i_left'][0].item()} i_right={batch['i_right'][0].item()}"
         )
         print(f"[{prefix}] sample[0] instruction={batch['instruction'][0]}")
-        print(f"[{prefix}] sample[0] item_text={batch['item_text'][0]}")
-
-
-def _compute_alignment_metrics(u_vec, i_pos_vec, i_neg_vecs, t_vec, tau_ui: float, tau_it: float):
-    # TEMP_DISABLED_USER_CF: kept for rollback; train_step now uses item-text metrics only.
-    """Compute Top-1 accuracy metrics for user-item and item-text alignment."""
-    u = QRecInstructAlignmentModel.l2norm(u_vec)
-    pos = QRecInstructAlignmentModel.l2norm(i_pos_vec)
-    neg = QRecInstructAlignmentModel.l2norm(i_neg_vecs)
-    text = QRecInstructAlignmentModel.l2norm(t_vec)
-
-    pos_logits = (u * pos).sum(-1, keepdim=True) / tau_ui
-    neg_logits = (u.unsqueeze(1) * neg).sum(-1) / tau_ui
-    ui_logits = torch.cat([pos_logits, neg_logits], dim=1)
-    ui_predictions = ui_logits.argmax(dim=1)
-    ui_top1 = (ui_predictions == 0).float().mean()
-
-    it_logits = (pos @ text.T) / tau_it
-    it_labels = torch.arange(pos.size(0), device=pos.device)
-    it_predictions = it_logits.argmax(dim=1)
-    it_top1 = (it_predictions == it_labels).float().mean()
-
-    return {
-        "ui_top1": ui_top1,
-        "it_top1": it_top1,
-    }
+        print(f"[{prefix}] sample[0] text={batch['text'][0]}")
 
 
 def _compute_item_text_metrics(i_pos_vec, t_vec, tau_it: float):
@@ -212,101 +179,125 @@ def _compute_item_text_metrics(i_pos_vec, t_vec, tau_it: float):
     }
 
 
+def _move_batch_to_device(batch, device):
+    for key, value in batch.items():
+        if isinstance(value, torch.Tensor):
+            batch[key] = value.to(device)
+    return batch
+
+
+def _subset_batch(batch, indices):
+    index_list = indices.detach().cpu().tolist()
+    out = {}
+    for key, value in batch.items():
+        if isinstance(value, torch.Tensor):
+            out[key] = value[indices]
+        else:
+            out[key] = [value[i] for i in index_list]
+    return out
+
+
+def _indices_for_type(batch, sample_type: str, device):
+    indices = [idx for idx, current in enumerate(batch["sample_type"]) if current == sample_type]
+    return torch.tensor(indices, dtype=torch.long, device=device)
+
+
 def train_step(
     batch,
     model: QRecInstructAlignmentModel,
     w_ui: float = 1.0,
     w_it: float = 1.0,
+    w_ii: float = 1.0,
     tau_ui: float = 0.07,
+    tau_ii: float = 0.07,
     tau_it: float = 0.2,
     debug_batch: bool = False,
 ):
-    device = batch["u"].device
-    u = batch["u"]
-    i_pos = batch["i_pos"]
-    i_negs = batch["i_negs"]
-    ins_list = batch["instruction"]
-    itxt_list = batch["item_text"]
+    device = batch["i_left"].device
 
     if debug_batch:
         _log_batch_preview(batch)
 
-    ins_tok_emb = model.ins_tokens(ins_list, device)
+    zero = next(model.parameters()).sum() * 0.0
+    logs = {
+        "L_it": zero,
+        "L_ii": zero,
+        "L_ui": zero,
+        "it_top1": zero.detach(),
+        "ii_top1": zero.detach(),
+        "ui_top1": zero.detach(),
+    }
+    losses = []
 
-    # TEMP_DISABLED_USER_CF: old stage-1 user branch.
-    # u_vec = model.enc_user(u, ins_tok_emb)
-    u_vec = None
-    i_pos_vec = model.enc_item(i_pos, ins_tok_emb)
+    item_text_idx = _indices_for_type(batch, "item_text", device)
+    if item_text_idx.numel() >= 2:
+        item_text_batch = _subset_batch(batch, item_text_idx)
+        ins_tok_emb = model.ins_tokens(item_text_batch["instruction"], device)
+        item_vec = model.enc_item(item_text_batch["i_left"], ins_tok_emb)
+        text_vec = model.text_vec(item_text_batch["text"], device)
+        logs["L_it"] = model.loss_item_text_symmetric(item_vec, text_vec, tau=tau_it)
+        logs["it_top1"] = _compute_item_text_metrics(item_vec, text_vec, tau_it)["it_top1"]
+        losses.append(w_it * logs["L_it"])
 
-    # TEMP_DISABLED_USER_CF: negatives were only needed by user-item contrastive loss.
-    # B, K = i_negs.shape
-    # ins_rep = ins_tok_emb.repeat_interleave(K, dim=0)
-    # i_negs_flat = i_negs.reshape(B * K)
-    # i_neg_vec_flat = model.enc_item(i_negs_flat, ins_rep)
-    # i_neg_vecs = i_neg_vec_flat.reshape(B, K, -1)
-    i_neg_vecs = None
+    item_item_idx = _indices_for_type(batch, "item_item", device)
+    if item_item_idx.numel() >= 2:
+        item_item_batch = _subset_batch(batch, item_item_idx)
+        ins_tok_emb = model.ins_tokens(item_item_batch["instruction"], device)
+        left_vec = model.enc_item(item_item_batch["i_left"], ins_tok_emb)
+        right_vec = model.enc_item(item_item_batch["i_right"], ins_tok_emb)
+        logs["L_ii"] = model.loss_multiquery_inbatch_symmetric(left_vec, right_vec, tau=tau_ii)
+        logs["ii_top1"] = model.multiquery_inbatch_top1(left_vec, right_vec, tau=tau_ii)
+        losses.append(w_ii * logs["L_ii"])
 
-    t_vec = model.text_vec(itxt_list, device)
+    user_item_idx = _indices_for_type(batch, "user_item", device)
+    if user_item_idx.numel() >= 2:
+        user_item_batch = _subset_batch(batch, user_item_idx)
+        ins_tok_emb = model.ins_tokens(user_item_batch["instruction"], device)
+        user_vec = model.enc_user(user_item_batch["u"], ins_tok_emb)
+        item_vec = model.enc_item(user_item_batch["i_left"], ins_tok_emb)
+        logs["L_ui"] = model.loss_multiquery_inbatch_symmetric(user_vec, item_vec, tau=tau_ui)
+        logs["ui_top1"] = model.multiquery_inbatch_top1(user_vec, item_vec, tau=tau_ui)
+        losses.append(w_ui * logs["L_ui"])
 
-    # TEMP_DISABLED_USER_CF: skip user-item loss because it depends on user CF.
-    # L_ui = model.loss_user_item(u_vec, i_pos_vec, i_neg_vecs, tau=tau_ui)
-    L_ui = i_pos_vec.new_zeros(())
-    L_it = model.loss_item_text_symmetric(i_pos_vec, t_vec, tau=tau_it)
-    # metrics = _compute_alignment_metrics(u_vec, i_pos_vec, i_neg_vecs, t_vec, tau_ui, tau_it)
-    metrics = _compute_item_text_metrics(i_pos_vec, t_vec, tau_it)
-
-    # TEMP_DISABLED_USER_CF: old loss mixed user-item and item-text objectives.
-    # loss = w_ui * L_ui + w_it * L_it
-    loss = w_it * L_it
-    return loss, {"L_ui": L_ui, "L_it": L_it, **metrics}
-
+    loss = sum(losses, zero)
+    return loss, logs
 
 
-def evaluate_loss(model, loader, w_ui=1.0, w_it=1.0, tau_ui=0.07, tau_it=0.2):
-    """
-    Evaluates the model on a given dataloader.
-    Returns average loss, L_ui, and L_it.
-    """
+def evaluate_loss(model, loader, w_ui=1.0, w_it=1.0, w_ii=1.0, tau_ui=0.07, tau_ii=0.07, tau_it=0.2):
     model.eval()
     device = next(model.parameters()).device
-    total_loss = 0.0
-    total_lui = 0.0
-    total_lit = 0.0
-    total_ui_top1 = 0.0
-    total_it_top1 = 0.0
+    totals = {
+        "loss": 0.0,
+        "L_it": 0.0,
+        "L_ii": 0.0,
+        "L_ui": 0.0,
+        "it_top1": 0.0,
+        "ii_top1": 0.0,
+        "ui_top1": 0.0,
+    }
     steps = 0
 
     with torch.no_grad():
         for batch in loader:
-            batch["u"] = batch["u"].to(device)
-            batch["i_pos"] = batch["i_pos"].to(device)
-            batch["i_negs"] = batch["i_negs"].to(device)
-            
+            batch = _move_batch_to_device(batch, device)
             loss, logs = train_step(
                 batch,
                 model,
                 w_ui=w_ui,
                 w_it=w_it,
+                w_ii=w_ii,
                 tau_ui=tau_ui,
+                tau_ii=tau_ii,
                 tau_it=tau_it,
             )
-            
-            total_loss += loss.item()
-            total_lui += logs["L_ui"].item()
-            total_lit += logs["L_it"].item()
-            total_ui_top1 += logs["ui_top1"].item()
-            total_it_top1 += logs["it_top1"].item()
+            totals["loss"] += loss.item()
+            for key in logs:
+                totals[key] += logs[key].item()
             steps += 1
 
     if steps == 0:
-        return 0, 0, 0, 0, 0
-    return (
-        total_loss / steps,
-        total_lui / steps,
-        total_lit / steps,
-        total_ui_top1 / steps,
-        total_it_top1 / steps,
-    )
+        return {key: 0.0 for key in totals}
+    return {key: value / steps for key, value in totals.items()}
 
 
 def _save_checkpoint(
@@ -314,22 +305,14 @@ def _save_checkpoint(
     model,
     optimizer,
     epoch,
-    val_loss,
-    val_lui,
-    val_lit,
-    val_ui_top1,
-    val_it_top1,
+    val_logs,
 ):
     torch.save(
         {
             "epoch": epoch,
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
-            "val_loss": val_loss,
-            "val_lui": val_lui,
-            "val_lit": val_lit,
-            "val_ui_top1": val_ui_top1,
-            "val_it_top1": val_it_top1,
+            **{f"val_{key}": value for key, value in val_logs.items()},
         },
         checkpoint_path,
     )
@@ -367,19 +350,23 @@ def train_qformer_stage1_representation(cfg):
         min_delta=cfg.early_stopping_min_delta,
     )
     log_step("Training setup", f"seed={cfg.seed}, output_dir={outdir}")
+    w_ii = float(cfg.get("w_ii", 1.0))
+    tau_ii = float(cfg.get("tau_ii", cfg.tau_ui))
 
     for epoch in range(cfg.epoch):
         model.train()
-        train_loss = 0
-        train_lui = 0
-        train_lit = 0
-        train_ui_top1 = 0
-        train_it_top1 = 0
+        train_totals = {
+            "loss": 0.0,
+            "L_it": 0.0,
+            "L_ii": 0.0,
+            "L_ui": 0.0,
+            "it_top1": 0.0,
+            "ii_top1": 0.0,
+            "ui_top1": 0.0,
+        }
         train_steps = 0
         for batch in train_loader:
-            batch["u"] = batch["u"].to(device)
-            batch["i_pos"] = batch["i_pos"].to(device)
-            batch["i_negs"] = batch["i_negs"].to(device)
+            batch = _move_batch_to_device(batch, device)
             opt.zero_grad()
 
             loss, logs = train_step(
@@ -387,55 +374,53 @@ def train_qformer_stage1_representation(cfg):
                 model,
                 w_ui=cfg.w_ui,
                 w_it=cfg.w_it,
+                w_ii=w_ii,
                 tau_ui=cfg.tau_ui,
+                tau_ii=tau_ii,
                 tau_it=cfg.tau_it,
                 debug_batch=cfg.debug_batch and epoch == 0 and train_steps < cfg.debug_batch_max_steps,
             )
             loss.backward()
             opt.step()
             
-            train_loss += loss.item()
-            train_lui += logs["L_ui"].item()
-            train_lit += logs["L_it"].item()
-            train_ui_top1 += logs["ui_top1"].item()
-            train_it_top1 += logs["it_top1"].item()
+            train_totals["loss"] += loss.item()
+            for key in logs:
+                train_totals[key] += logs[key].item()
             train_steps += 1    
 
         if (epoch + 1) % cfg.log_epoch == 0:
-            avg_train_loss = train_loss / train_steps if train_steps > 0 else 0
-            avg_train_lui = train_lui / train_steps if train_steps > 0 else 0
-            avg_train_lit = train_lit / train_steps if train_steps > 0 else 0
-            avg_train_ui_top1 = train_ui_top1 / train_steps if train_steps > 0 else 0
-            avg_train_it_top1 = train_it_top1 / train_steps if train_steps > 0 else 0
-            val_loss, val_lui, val_lit, val_ui_top1, val_it_top1 = evaluate_loss(
+            avg_train = {
+                key: value / train_steps if train_steps > 0 else 0.0
+                for key, value in train_totals.items()
+            }
+            val_logs = evaluate_loss(
                 model,
                 val_loader,
                 w_ui=cfg.w_ui,
                 w_it=cfg.w_it,
+                w_ii=w_ii,
                 tau_ui=cfg.tau_ui,
+                tau_ii=tau_ii,
                 tau_it=cfg.tau_it,
             )
             print(
                 f"epoch {epoch+1} | "
-                f"Train Loss={avg_train_loss:.4f} L_ui={avg_train_lui:.4f} L_it={avg_train_lit:.4f} "
-                f"UI@1={avg_train_ui_top1:.4f} IT@1={avg_train_it_top1:.4f} | "
-                f"Val Loss={val_loss:.4f} L_ui={val_lui:.4f} L_it={val_lit:.4f} "
-                f"UI@1={val_ui_top1:.4f} IT@1={val_it_top1:.4f} | "
-                f"w_it={cfg.w_it:.3f} tau_ui={cfg.tau_ui:.3f} tau_it={cfg.tau_it:.3f}"
+                f"Train Loss={avg_train['loss']:.4f} L_it={avg_train['L_it']:.4f} "
+                f"L_ii={avg_train['L_ii']:.4f} L_ui={avg_train['L_ui']:.4f} "
+                f"IT@1={avg_train['it_top1']:.4f} II@1={avg_train['ii_top1']:.4f} "
+                f"UI@1={avg_train['ui_top1']:.4f} | "
+                f"Val Loss={val_logs['loss']:.4f} L_it={val_logs['L_it']:.4f} "
+                f"L_ii={val_logs['L_ii']:.4f} L_ui={val_logs['L_ui']:.4f} "
+                f"IT@1={val_logs['it_top1']:.4f} II@1={val_logs['ii_top1']:.4f} "
+                f"UI@1={val_logs['ui_top1']:.4f} | "
+                f"w_it={cfg.w_it:.3f} w_ii={w_ii:.3f} w_ui={cfg.w_ui:.3f} "
+                f"tau_it={cfg.tau_it:.3f} tau_ii={tau_ii:.3f} tau_ui={cfg.tau_ui:.3f}"
             )
 
             metrics = {
                 "epoch": epoch + 1,
-                "val_loss": val_loss,
-                "val_lui": val_lui,
-                "val_lit": val_lit,
-                "val_ui_top1": val_ui_top1,
-                "val_it_top1": val_it_top1,
-                "train_loss": avg_train_loss,
-                "train_lui": avg_train_lui,
-                "train_lit": avg_train_lit,
-                "train_ui_top1": avg_train_ui_top1,
-                "train_it_top1": avg_train_it_top1,
+                **{f"val_{key}": value for key, value in val_logs.items()},
+                **{f"train_{key}": value for key, value in avg_train.items()},
             }
             improved = stopper.update(metrics)
 
@@ -445,11 +430,7 @@ def train_qformer_stage1_representation(cfg):
                     model,
                     opt,
                     epoch + 1,
-                    val_loss,
-                    val_lui,
-                    val_lit,
-                    val_ui_top1,
-                    val_it_top1,
+                    val_logs,
                 )
                 log_step("Saved new best checkpoint", f"epoch={epoch + 1}, path={best_checkpoint_path}")
             else:
@@ -476,24 +457,32 @@ def train_qformer_stage1_representation(cfg):
             "Loaded best checkpoint",
             (
                 f"epoch={best_checkpoint['epoch']}, val_loss={best_checkpoint['val_loss']:.4f}, "
-                f"ui_top1={best_checkpoint.get('val_ui_top1', 0.0):.4f}, "
-                f"it_top1={best_checkpoint.get('val_it_top1', 0.0):.4f}"
+                f"it_top1={best_checkpoint.get('val_it_top1', 0.0):.4f}, "
+                f"ii_top1={best_checkpoint.get('val_ii_top1', 0.0):.4f}, "
+                f"ui_top1={best_checkpoint.get('val_ui_top1', 0.0):.4f}"
             ),
         )
 
     # Final Test
     log_step("Evaluating on Test Set")
-    test_loss, test_lui, test_lit, test_ui_top1, test_it_top1 = evaluate_loss(
+    test_logs = evaluate_loss(
         model,
         test_loader,
         w_ui=cfg.w_ui,
         w_it=cfg.w_it,
+        w_ii=w_ii,
         tau_ui=cfg.tau_ui,
+        tau_ii=tau_ii,
         tau_it=cfg.tau_it,
     )
     log_step(
         "Test results",
-        f"loss={test_loss:.4f}, l_ui={test_lui:.4f}, l_it={test_lit:.4f}, ui@1={test_ui_top1:.4f}, it@1={test_it_top1:.4f}",
+        (
+            f"loss={test_logs['loss']:.4f}, l_it={test_logs['L_it']:.4f}, "
+            f"l_ii={test_logs['L_ii']:.4f}, l_ui={test_logs['L_ui']:.4f}, "
+            f"it@1={test_logs['it_top1']:.4f}, ii@1={test_logs['ii_top1']:.4f}, "
+            f"ui@1={test_logs['ui_top1']:.4f}"
+        ),
     )
 
     if best_checkpoint is not None:
@@ -524,10 +513,6 @@ def main():
         "num_queries",
         "num_heads",
         "num_layers",
-        "neg_k",
-        "hard_k",
-        "p_fixed",
-        "samples_per_user",
         "lr",
         "w_ui",
         "w_it",
@@ -557,30 +542,33 @@ def main():
 
     first_dataset_key = list(cfg.datasets_cfg.keys())[0]
     stage1_cfg.data_dir = cfg.datasets_cfg[first_dataset_key].path
+    item_pair_window = int(stage1_cfg.get("item_pair_window", 2))
+    max_item_item_pairs = stage1_cfg.get("max_item_item_pairs", None)
+    max_user_item_pairs = stage1_cfg.get("max_user_item_pairs", None)
 
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "train_ood2.pkl"),
         output_path=os.path.join(stage1_cfg.data_dir, "train_qformer_ood2.pkl"),
-        neg_k=stage1_cfg.neg_k,
-        hard_k=stage1_cfg.hard_k,
-        p_fixed=stage1_cfg.p_fixed,
-        samples_per_user=stage1_cfg.samples_per_user,
+        seed=stage1_cfg.seed,
+        item_pair_window=item_pair_window,
+        max_item_item_pairs=max_item_item_pairs,
+        max_user_item_pairs=max_user_item_pairs,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "valid_ood2.pkl"),
         output_path=os.path.join(stage1_cfg.data_dir, "valid_qformer_ood2.pkl"),
-        neg_k=stage1_cfg.neg_k,
-        hard_k=stage1_cfg.hard_k,
-        p_fixed=stage1_cfg.p_fixed,
-        samples_per_user=stage1_cfg.samples_per_user,
+        seed=stage1_cfg.seed,
+        item_pair_window=item_pair_window,
+        max_item_item_pairs=max_item_item_pairs,
+        max_user_item_pairs=max_user_item_pairs,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "test_ood2.pkl"),
         output_path=os.path.join(stage1_cfg.data_dir, "test_qformer_ood2.pkl"),
-        neg_k=stage1_cfg.neg_k,
-        hard_k=stage1_cfg.hard_k,
-        p_fixed=stage1_cfg.p_fixed,
-        samples_per_user=stage1_cfg.samples_per_user,
+        seed=stage1_cfg.seed,
+        item_pair_window=item_pair_window,
+        max_item_item_pairs=max_item_item_pairs,
+        max_user_item_pairs=max_user_item_pairs,
     )
 
     train_qformer_stage1_representation(stage1_cfg)

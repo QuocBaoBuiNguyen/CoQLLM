@@ -12,13 +12,11 @@ class QRecInstructAlignmentModel(nn.Module):
         self.text_encoder = text_encoder
 
         d = text_encoder.model.config.hidden_size
-        # TEMP_DISABLED_USER_CF: user CF is not part of the temporary QFormer/LLM path.
-        # self.p_user = nn.Linear(d, d)
+        self.p_user = nn.Linear(d, d)
         self.p_item = nn.Linear(d, d)
         self.p_text = nn.Linear(d, d)
 
     def pool_queries(self, q_tokens: torch.Tensor) -> torch.Tensor:
-        # Kept only for the old pooled-QFormer path. Do not use in the ILM-style path.
         return q_tokens.mean(dim=1)
 
     def ins_tokens(self, ins_list, device):
@@ -30,25 +28,19 @@ class QRecInstructAlignmentModel(nn.Module):
         return self.p_text(pooled)
 
     def enc_user(self, u_ids, ins_tok_emb):
-        # TEMP_DISABLED_USER_CF: old stage-1 path encoded the user CF vector.
-        # u_cf = self.mf.user_encoder(u_ids)
-        # u_q = self.qformer(u_cf, ins_tok_emb)
-        # return self.p_user(self.pool_queries(u_q))
-        raise RuntimeError("User CF encoding is temporarily disabled.")
+        u_cf = self.mf.user_encoder(u_ids)
+        u_q = self.qformer(u_cf, ins_tok_emb)
+        return self.p_user(u_q)
 
     def enc_item(self, i_ids, ins_tok_emb):
         i_cf = self.mf.item_encoder(i_ids)
         i_q = self.qformer(i_cf, ins_tok_emb)
-        # Old path pooled all Q-Former query tokens into one vector too early:
-        # return self.p_item(self.pool_queries(i_q))
         return self.p_item(i_q)
 
     def forward(self, u_idx: torch.Tensor, i_idx: torch.Tensor, ins_list: list[str], text_list: list[str]):
         device = u_idx.device
         ins_tok_emb = self.ins_tokens(ins_list, device)
-        # TEMP_DISABLED_USER_CF: keep old call nearby for easy rollback.
-        # user_z = self.enc_user(u_idx, ins_tok_emb)
-        user_z = None
+        user_z = self.enc_user(u_idx, ins_tok_emb)
         item_z = self.enc_item(i_idx, ins_tok_emb)
         text_z = self.text_vec(text_list, device)
         return {"user": user_z, "item": item_z, "text": text_z}
@@ -89,17 +81,44 @@ class QRecInstructAlignmentModel(nn.Module):
         return selected_queries, selected_indices
 
     @staticmethod
-    def loss_user_item(u_vec: torch.Tensor, i_pos_vec: torch.Tensor, i_neg_vecs: torch.Tensor, tau: float = 0.07):
-        u = QRecInstructAlignmentModel.l2norm(u_vec)
-        pos = QRecInstructAlignmentModel.l2norm(i_pos_vec)
-        neg = QRecInstructAlignmentModel.l2norm(i_neg_vecs)
+    def multiquery_inbatch_logits(left_tokens: torch.Tensor, right_tokens: torch.Tensor, tau: float = 0.07):
+        if left_tokens.dim() == 2:
+            left_tokens = left_tokens.unsqueeze(1)
+        if right_tokens.dim() == 2:
+            right_tokens = right_tokens.unsqueeze(1)
+        if left_tokens.dim() != 3 or right_tokens.dim() != 3:
+            raise ValueError(
+                "Expected pair inputs to have shape [B, Q, D] or [B, D], "
+                f"got left={tuple(left_tokens.shape)}, right={tuple(right_tokens.shape)}"
+            )
+        if left_tokens.size(-1) != right_tokens.size(-1):
+            raise ValueError(
+                "Pair embedding dimension mismatch: "
+                f"left={tuple(left_tokens.shape)}, right={tuple(right_tokens.shape)}"
+            )
 
-        pos_logit = (u * pos).sum(-1, keepdim=True) / tau
-        neg_logit = (u.unsqueeze(1) * neg).sum(-1) / tau
+        left = QRecInstructAlignmentModel.l2norm(left_tokens)
+        right = QRecInstructAlignmentModel.l2norm(right_tokens)
+        query_logits = torch.einsum("bqd,crd->bcqr", left, right) / tau
+        return query_logits.amax(dim=(-1, -2))
 
-        logits = torch.cat([pos_logit, neg_logit], dim=1)
-        labels = torch.zeros(u.size(0), dtype=torch.long, device=u.device)
-        return F.cross_entropy(logits, labels)
+    @staticmethod
+    def loss_multiquery_inbatch_symmetric(
+        left_tokens: torch.Tensor,
+        right_tokens: torch.Tensor,
+        tau: float = 0.07,
+    ):
+        logits = QRecInstructAlignmentModel.multiquery_inbatch_logits(left_tokens, right_tokens, tau=tau)
+        labels = torch.arange(logits.size(0), device=logits.device)
+        loss_left = F.cross_entropy(logits, labels)
+        loss_right = F.cross_entropy(logits.T, labels)
+        return (loss_left + loss_right) / 2
+
+    @staticmethod
+    def multiquery_inbatch_top1(left_tokens: torch.Tensor, right_tokens: torch.Tensor, tau: float = 0.07):
+        logits = QRecInstructAlignmentModel.multiquery_inbatch_logits(left_tokens, right_tokens, tau=tau)
+        labels = torch.arange(logits.size(0), device=logits.device)
+        return (logits.argmax(dim=1) == labels).float().mean()
 
     @staticmethod
     def loss_item_text(i_q_tokens: torch.Tensor, t_vec: torch.Tensor, tau: float = 0.07):
