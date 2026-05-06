@@ -160,13 +160,16 @@ class RecBaseTask:
             metrics = self._compute_metrics(combined_data)
             
             metric_logger.synchronize_between_processes()
-            logging.info(
+            eval_summary = (
                 f"Averaged stats: {metric_logger.global_avg()} "
                 f"***auc: {metrics.get('auc', 0):.4f} ***uauc: {metrics.get('uauc', 0):.4f}"
-            )        
+            )
+            logging.info(eval_summary)
+            log_step("Evaluation metrics", f"AUC={metrics.get('auc', 0):.6f}, uAUC={metrics.get('uauc', 0):.6f}")
             
             all_results = {
             'agg_metrics': metrics.get('auc', -metric_logger.meters['loss'].global_avg),
+            'auc': metrics.get('auc', 0),
             'acc': metric_logger.meters.get('acc', SmoothedValue()).global_avg,
             'loss': metric_logger.meters['loss'].global_avg,
             'uauc': metrics.get('uauc', 0)
