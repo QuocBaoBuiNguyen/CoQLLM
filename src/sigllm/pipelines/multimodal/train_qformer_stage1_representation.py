@@ -350,8 +350,6 @@ def train_qformer_stage1_representation(cfg):
         min_delta=cfg.early_stopping_min_delta,
     )
     log_step("Training setup", f"seed={cfg.seed}, output_dir={outdir}")
-    w_ii = float(cfg.get("w_ii", 1.0))
-    tau_ii = float(cfg.get("tau_ii", cfg.tau_ui))
 
     for epoch in range(cfg.epoch):
         model.train()
@@ -374,9 +372,9 @@ def train_qformer_stage1_representation(cfg):
                 model,
                 w_ui=cfg.w_ui,
                 w_it=cfg.w_it,
-                w_ii=w_ii,
+                w_ii=cfg.w_ii,
                 tau_ui=cfg.tau_ui,
-                tau_ii=tau_ii,
+                tau_ii=cfg.tau_ii,
                 tau_it=cfg.tau_it,
                 debug_batch=cfg.debug_batch and epoch == 0 and train_steps < cfg.debug_batch_max_steps,
             )
@@ -398,9 +396,9 @@ def train_qformer_stage1_representation(cfg):
                 val_loader,
                 w_ui=cfg.w_ui,
                 w_it=cfg.w_it,
-                w_ii=w_ii,
+                w_ii=cfg.w_ii,
                 tau_ui=cfg.tau_ui,
-                tau_ii=tau_ii,
+                tau_ii=cfg.tau_ii,
                 tau_it=cfg.tau_it,
             )
             print(
@@ -413,8 +411,8 @@ def train_qformer_stage1_representation(cfg):
                 f"L_ii={val_logs['L_ii']:.4f} L_ui={val_logs['L_ui']:.4f} "
                 f"IT@1={val_logs['it_top1']:.4f} II@1={val_logs['ii_top1']:.4f} "
                 f"UI@1={val_logs['ui_top1']:.4f} | "
-                f"w_it={cfg.w_it:.3f} w_ii={w_ii:.3f} w_ui={cfg.w_ui:.3f} "
-                f"tau_it={cfg.tau_it:.3f} tau_ii={tau_ii:.3f} tau_ui={cfg.tau_ui:.3f}"
+                f"w_it={cfg.w_it:.3f} w_ii={cfg.w_ii:.3f} w_ui={cfg.w_ui:.3f} "
+                f"tau_it={cfg.tau_it:.3f} tau_ii={cfg.tau_ii:.3f} tau_ui={cfg.tau_ui:.3f}"
             )
 
             metrics = {
@@ -470,9 +468,9 @@ def train_qformer_stage1_representation(cfg):
         test_loader,
         w_ui=cfg.w_ui,
         w_it=cfg.w_it,
-        w_ii=w_ii,
+        w_ii=cfg.w_ii,
         tau_ui=cfg.tau_ui,
-        tau_ii=tau_ii,
+        tau_ii=cfg.tau_ii,
         tau_it=cfg.tau_it,
     )
     log_step(
@@ -516,7 +514,9 @@ def main():
         "lr",
         "w_ui",
         "w_it",
+        "w_ii",
         "tau_ui",
+        "tau_ii",
         "tau_it",
         "weight_decay",
         "debug_batch",
