@@ -212,6 +212,7 @@ def train_step(
     tau_ii: float = 0.07,
     tau_it: float = 0.2,
     debug_batch: bool = False,
+    enable_user_item: bool = False,
 ):
     device = batch["i_left"].device
 
@@ -235,7 +236,7 @@ def train_step(
         ins_tok_emb = model.ins_tokens(item_text_batch["instruction"], device)
         item_vec = model.enc_item(item_text_batch["i_left"], ins_tok_emb)
         text_vec = model.text_vec(item_text_batch["text"], device)
-        logs["L_it"] = model.loss_item_text_symmetric(item_vec, text_vec, tau=tau_it)
+        logs["L_it"] = model.loss_item_text(item_vec, text_vec, tau=tau_it)
         logs["it_top1"] = _compute_item_text_metrics(item_vec, text_vec, tau_it)["it_top1"]
         losses.append(w_it * logs["L_it"])
 
@@ -245,12 +246,12 @@ def train_step(
         ins_tok_emb = model.ins_tokens(item_item_batch["instruction"], device)
         left_vec = model.enc_item(item_item_batch["i_left"], ins_tok_emb)
         right_vec = model.enc_item(item_item_batch["i_right"], ins_tok_emb)
-        logs["L_ii"] = model.loss_multiquery_inbatch_symmetric(left_vec, right_vec, tau=tau_ii)
+        logs["L_ii"] = model.loss_item_item_ilm(left_vec, right_vec, tau=tau_ii)
         logs["ii_top1"] = model.multiquery_inbatch_top1(left_vec, right_vec, tau=tau_ii)
         losses.append(w_ii * logs["L_ii"])
 
     user_item_idx = _indices_for_type(batch, "user_item", device)
-    if user_item_idx.numel() >= 2:
+    if enable_user_item and w_ui > 0.0 and user_item_idx.numel() >= 2:
         user_item_batch = _subset_batch(batch, user_item_idx)
         ins_tok_emb = model.ins_tokens(user_item_batch["instruction"], device)
         user_vec = model.enc_user(user_item_batch["u"], ins_tok_emb)
@@ -263,7 +264,17 @@ def train_step(
     return loss, logs
 
 
-def evaluate_loss(model, loader, w_ui=1.0, w_it=1.0, w_ii=1.0, tau_ui=0.07, tau_ii=0.07, tau_it=0.2):
+def evaluate_loss(
+    model,
+    loader,
+    w_ui=1.0,
+    w_it=1.0,
+    w_ii=1.0,
+    tau_ui=0.07,
+    tau_ii=0.07,
+    tau_it=0.2,
+    enable_user_item: bool = False,
+):
     model.eval()
     device = next(model.parameters()).device
     totals = {
@@ -289,6 +300,7 @@ def evaluate_loss(model, loader, w_ui=1.0, w_it=1.0, w_ii=1.0, tau_ui=0.07, tau_
                 tau_ui=tau_ui,
                 tau_ii=tau_ii,
                 tau_it=tau_it,
+                enable_user_item=enable_user_item,
             )
             totals["loss"] += loss.item()
             for key in logs:
@@ -377,6 +389,7 @@ def train_qformer_stage1_representation(cfg):
                 tau_ii=cfg.tau_ii,
                 tau_it=cfg.tau_it,
                 debug_batch=cfg.debug_batch and epoch == 0 and train_steps < cfg.debug_batch_max_steps,
+                enable_user_item=bool(cfg.get("include_user_item", False)),
             )
             loss.backward()
             opt.step()
@@ -400,6 +413,7 @@ def train_qformer_stage1_representation(cfg):
                 tau_ui=cfg.tau_ui,
                 tau_ii=cfg.tau_ii,
                 tau_it=cfg.tau_it,
+                enable_user_item=bool(cfg.get("include_user_item", False)),
             )
             print(
                 f"epoch {epoch+1} | "
@@ -472,6 +486,7 @@ def train_qformer_stage1_representation(cfg):
         tau_ui=cfg.tau_ui,
         tau_ii=cfg.tau_ii,
         tau_it=cfg.tau_it,
+        enable_user_item=bool(cfg.get("include_user_item", False)),
     )
     log_step(
         "Test results",
@@ -545,6 +560,7 @@ def main():
     item_pair_window = int(stage1_cfg.get("item_pair_window", 2))
     max_item_item_pairs = stage1_cfg.get("max_item_item_pairs", None)
     max_user_item_pairs = stage1_cfg.get("max_user_item_pairs", None)
+    include_user_item = bool(stage1_cfg.get("include_user_item", False))
 
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "train_ood2.pkl"),
@@ -553,6 +569,7 @@ def main():
         item_pair_window=item_pair_window,
         max_item_item_pairs=max_item_item_pairs,
         max_user_item_pairs=max_user_item_pairs,
+        include_user_item=include_user_item,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "valid_ood2.pkl"),
@@ -561,6 +578,7 @@ def main():
         item_pair_window=item_pair_window,
         max_item_item_pairs=max_item_item_pairs,
         max_user_item_pairs=max_user_item_pairs,
+        include_user_item=include_user_item,
     )
     QFormerAlignmentBuilder.build_qformer_alignment_samples(        
         input_pkl_path=os.path.join(stage1_cfg.data_dir, "test_ood2.pkl"),
@@ -569,6 +587,7 @@ def main():
         item_pair_window=item_pair_window,
         max_item_item_pairs=max_item_item_pairs,
         max_user_item_pairs=max_user_item_pairs,
+        include_user_item=include_user_item,
     )
 
     train_qformer_stage1_representation(stage1_cfg)

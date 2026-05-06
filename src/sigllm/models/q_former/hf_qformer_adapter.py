@@ -26,12 +26,12 @@ class HFQFormerAdapter(nn.Module):
     Internally, it reshapes the current inputs into the format expected by
     `Blip2QFormerModel`:
 
-    - learned query tokens -> `query_embeds`
-    - projected CF vector  -> one extra encoder token
-    - instruction tokens + CF token -> `encoder_hidden_states`
+    - learned query tokens + instruction embeddings -> `query_embeds`
+    - projected CF vector -> `encoder_hidden_states`
 
-    This makes it easy to swap in without rewriting the rest of the stage-1 or
-    stage-2 pipeline.
+    This follows the InstructBLIP feature-extraction pattern: instructions
+    interact with learned queries through Q-Former self-attention, while the
+    non-language signal is read through cross-attention.
 
     TEMP_DISABLED_USER_CF: callers currently pass only item/history CF vectors.
     The adapter stays generic so the old user-CF path can be restored later.
@@ -134,14 +134,14 @@ class HFQFormerAdapter(nn.Module):
 
         batch_size = cf_vec.size(0)
 
-        query_embeds = self.q.expand(batch_size, -1, -1)
-        # TEMP_DISABLED_USER_CF: this CF token is now item/history-only in callers.
-        # The old user-CF caller code is commented in stage-1/stage-2 modules.
+        query_tokens = self.q.expand(batch_size, -1, -1)
+        query_count = query_tokens.size(1)
+        query_embeds = torch.cat([query_tokens, ins_token_emb], dim=1)
         cf_token = self.proj_cf(cf_vec).unsqueeze(1)
-        encoder_hidden_states = torch.cat([ins_token_emb, cf_token], dim=1)
+        encoder_hidden_states = cf_token
 
         query_attention_mask = torch.ones(
-            batch_size, self.num_queries, dtype=torch.long, device=cf_vec.device
+            batch_size, query_embeds.size(1), dtype=torch.long, device=cf_vec.device
         )
         encoder_attention_mask = torch.ones(
             batch_size, encoder_hidden_states.size(1), dtype=torch.long, device=cf_vec.device
@@ -154,4 +154,4 @@ class HFQFormerAdapter(nn.Module):
             encoder_attention_mask=encoder_attention_mask,
             return_dict=True,
         )
-        return outputs.last_hidden_state
+        return outputs.last_hidden_state[:, :query_count]

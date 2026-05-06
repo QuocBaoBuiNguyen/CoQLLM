@@ -398,7 +398,7 @@ class QRecLLM(Rec2Base):
         positions.sort(key=lambda x: x[0])
         return [ph for _, ph in positions]
 
-    def encode_rec_features_to_llm_v2(self, batch_data, feature_order=None):
+    def encode_rec_features_to_llm_v2(self, batch_data, feature_order=None, instruction_list=None):
         """
         Encodes recommendation features (History, Target) into LLM embedding space.
         
@@ -427,12 +427,12 @@ class QRecLLM(Rec2Base):
         Q = self.proj_token_num
         H = self.llama_model.config.hidden_size
 
-        # 0) instruction tokens (stage2 MVP: fixed instruction)
-        # (Nếu batch_data có instruction thì dùng batch_data["instruction"])
-        ins_list = batch_data.get(
-            "instruction",
-            ["Dựa trên lịch sử tương tác, dự đoán người dùng có thích bộ phim này không. Yes/No."] * B
-        )
+        if instruction_list is None:
+            instruction_list = batch_data.get(
+                "instruction",
+                ["Use the interaction history to predict whether the user will like the target movie."] * B,
+            )
+        ins_list = instruction_list
         ins_tok_emb, _ = self.text_encoder(ins_list, device, max_len=48)  # h:[B,L,d_model], pooled:[B,d_model]
         # NOTE: assume TextEncoder returns (h, pooled) like stage1
 
@@ -683,7 +683,13 @@ class QRecLLM(Rec2Base):
 
     def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
         feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
-        rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(batch_data, feature_order=feature_order)
+        batch_size = batch_data["UserID"].shape[0]
+        instruction_list = [prompt_template] * batch_size if prompt_template else None
+        rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(
+            batch_data,
+            feature_order=feature_order,
+            instruction_list=instruction_list,
+        )
         llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
         return llm_embeds, llm_atts
 

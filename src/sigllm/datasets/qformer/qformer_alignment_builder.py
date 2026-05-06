@@ -24,8 +24,9 @@ preprocessed splits. The output is a torch-saved dictionary:
 Each entry in "samples" has the same schema regardless of objective:
 
     sample_type:
-        One of "item_text", "item_item", "user_item". The stage-1 trainer
-        groups samples by this field and applies the matching contrastive loss.
+        One of "item_text", "item_item", "user_item". ILM-style training uses
+        "item_text" and "item_item"; "user_item" is kept as an optional
+        experiment for older checkpoints.
 
     u:
         User id. It is meaningful only for "user_item" samples. For item-only
@@ -62,11 +63,29 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
     TEMPL_ITEM_TEXT = [
         "Represent this movie for recommendation using its title and genres.",
         "Align this movie metadata with its collaborative filtering representation.",
+        "Given the movie metadata, extract recommendation-relevant item features.",
+        "Use the title and genres to describe this movie in the item embedding space.",
+        "Map this movie's textual attributes to its collaborative recommendation signal.",
+        "Identify the movie preferences implied by its title and genre metadata.",
+        "Create a language-aligned representation of this movie for recommendation.",
+        "Summarize this movie as an item a recommender system can compare.",
+        "Based on the title and genres, represent what kind of users may like this movie.",
+        "Encode the semantic information of this movie for item-language alignment.",
+        "Use a few metadata cues to align this movie with behavioral item signals.",
+        "Produce a recommendation-aware representation from this movie description.",
     ]
 
     TEMPL_ITEM_ITEM = [
         "Align movies that appear close together in positive user histories.",
         "Represent these two movies as behaviorally related items.",
+        "Given user interaction patterns, pull these related movies closer together.",
+        "Align two movies that are likely to share audience preferences.",
+        "Use collaborative behavior to represent these movies as similar items.",
+        "Compare these co-watched movies in the recommendation embedding space.",
+        "Learn item features that preserve this positive item-item relationship.",
+        "Encode the behavioral connection between these two movies.",
+        "Represent this movie pair using shared recommendation signals.",
+        "Use co-occurrence evidence to align the two movie representations.",
     ]
 
     TEMPL_USER_ITEM = [
@@ -84,6 +103,7 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
         item_pair_window: int = 2,
         max_item_item_pairs: int | None = None,
         max_user_item_pairs: int | None = None,
+        include_user_item: bool = False,
     ):
         rng = random.Random(seed)
 
@@ -222,12 +242,11 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
             item_item_samples = item_item_samples[: int(max_item_item_pairs)]
         samples.extend(item_item_samples)
 
-        # Step 4: user-item samples.
+        # Step 4: optional user-item samples.
         #
-        # Purpose:
-        #   Add personalized alignment between user CF embeddings and items the
-        #   user liked. This is useful for recommendation metrics such as uAUC,
-        #   while still keeping the dataset schema simple.
+        # ILM representation learning is item-centric. Stage 2 in this repo also
+        # injects item/history tokens rather than a user CF token, so the default
+        # is to leave these samples out of stage 1.
         #
         # Transform:
         #   Each positive row becomes one (user, positive item) pair.
@@ -247,21 +266,23 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
         #       "instruction": "...",
         #       "weight": 1.0,
         #   }
-        user_item_samples = [
-            {
-                "sample_type": "user_item",
-                "u": int(row.uid),
-                "i_left": int(row.iid),
-                "i_right": 0,
-                "text": format_item_text(int(row.iid)),
-                "instruction": rng.choice(QFormerAlignmentBuilder.TEMPL_USER_ITEM),
-                "weight": 1.0,
-            }
-            for row in pos_df.itertuples(index=False)
-        ]
-        if max_user_item_pairs is not None:
-            user_item_samples = user_item_samples[: int(max_user_item_pairs)]
-        samples.extend(user_item_samples)
+        user_item_samples = []
+        if include_user_item:
+            user_item_samples = [
+                {
+                    "sample_type": "user_item",
+                    "u": int(row.uid),
+                    "i_left": int(row.iid),
+                    "i_right": 0,
+                    "text": format_item_text(int(row.iid)),
+                    "instruction": rng.choice(QFormerAlignmentBuilder.TEMPL_USER_ITEM),
+                    "weight": 1.0,
+                }
+                for row in pos_df.itertuples(index=False)
+            ]
+            if max_user_item_pairs is not None:
+                user_item_samples = user_item_samples[: int(max_user_item_pairs)]
+            samples.extend(user_item_samples)
 
         # Step 5: persist one flat list.
         #
@@ -277,6 +298,7 @@ class QFormerAlignmentBuilder(RecBaseDatasetBuilder):
             "num_items": len(item_titles),
             "num_positive_rows": int(len(pos_df)),
             "item_pair_window": window,
+            "include_user_item": bool(include_user_item),
         }
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

@@ -81,8 +81,9 @@ run:
     item_pair_window: 2
     max_item_item_pairs: null
     max_user_item_pairs: null
+    include_user_item: False
     lr: 2e-4
-    w_ui: 1.0
+    w_ui: 0.0
     w_it: 1.0
     w_ii: 1.0
     tau_ui: 0.05
