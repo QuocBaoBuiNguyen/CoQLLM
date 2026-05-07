@@ -44,6 +44,7 @@ class HFQFormerAdapter(nn.Module):
         num_queries: int = 8,
         num_heads: int = 8,
         num_layers: int = 2,
+        output_dim: Optional[int] = None,
         dropout: float = 0.0,
         intermediate_size: Optional[int] = None,
         cross_attention_frequency: int = 1,
@@ -60,9 +61,11 @@ class HFQFormerAdapter(nn.Module):
         self.d_cf = d_cf
         self.d_model = d_model
         self.num_queries = num_queries
+        self.output_dim = int(output_dim) if output_dim is not None else d_model
 
         self.q = Parameter(torch.randn(1, num_queries, d_model))
         self.proj_cf = nn.Linear(d_cf, d_model)
+        self.out_proj = nn.Identity() if self.output_dim == d_model else nn.Linear(d_model, self.output_dim)
 
         config = Blip2QFormerConfig(
             hidden_size=d_model,
@@ -179,4 +182,5 @@ class HFQFormerAdapter(nn.Module):
         # Step 6: Return only the learned query outputs.
         # Instruction token outputs are conditioning context, not soft tokens to
         # pass into the downstream loss/LLM projection.
-        return outputs.last_hidden_state[:, :query_count]
+        query_outputs = outputs.last_hidden_state[:, :query_count]
+        return self.out_proj(query_outputs)

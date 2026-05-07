@@ -11,8 +11,9 @@ class QRecInstructAlignmentModel(nn.Module):
         self.qformer = qformer
         self.text_encoder = text_encoder
 
-        d = text_encoder.model.config.hidden_size
-        self.p_text = nn.Linear(d, d)
+        d_text = text_encoder.model.config.hidden_size
+        d_qformer = qformer.output_dim
+        self.p_text = nn.Linear(d_text, d_qformer)
 
     def pool_queries(self, q_tokens: torch.Tensor) -> torch.Tensor:
         return q_tokens.mean(dim=1)

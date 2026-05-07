@@ -83,6 +83,7 @@ class QRecLLM(Rec2Base):
         num_queries=8,
         num_heads=8,
         num_layers=2,
+        qformer_output_dim=None,
         lora_config=None,
         proj_mid=5,
         freeze_lora=False,
@@ -106,7 +107,7 @@ class QRecLLM(Rec2Base):
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model, low_resource, device_8bit)
         self.text_encoder, d_model = self._init_text_encoder(freeze_text_encoder=True)
-        self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, pretrained_qformer=pretrained_qformer, freeze_qformer=False)
+        self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, qformer_output_dim=qformer_output_dim, pretrained_qformer=pretrained_qformer, freeze_qformer=False)
         self._init_projection(proj_mid, proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
 
@@ -188,7 +189,7 @@ class QRecLLM(Rec2Base):
     #         for name, param in self.llama_model_lora.named_parameters():
     #             param.requires_grad = False
 
-    def _init_qformer(self, d_cf, d_model, num_queries, num_heads, num_layers,
+    def _init_qformer(self, d_cf, d_model, num_queries, num_heads, num_layers, qformer_output_dim,
                     pretrained_qformer: str, freeze_qformer: bool):
         log_step("Loading QFormer")
 
@@ -205,7 +206,8 @@ class QRecLLM(Rec2Base):
             d_model=d_model,
             num_queries=num_queries,
             num_heads=num_heads,
-            num_layers=num_layers
+            num_layers=num_layers,
+            output_dim=qformer_output_dim or self.llama_model.config.hidden_size,
         ).to(self.device)
 
         # 2) load checkpoint stage1
@@ -255,7 +257,7 @@ class QRecLLM(Rec2Base):
         if self.llama_model is None:
             raise ValueError("llama_model is None. Please init LLM backbone before init projection.")
 
-        d_q = self.qformer.proj_cf.out_features
+        d_q = self.qformer.output_dim
         # Q = int(self.qformer.q.shape[0]) // Qformer self-implemented 
         Q = int(self.qformer.q.shape[-2])
         H = int(self.llama_model.config.hidden_size)
@@ -266,6 +268,13 @@ class QRecLLM(Rec2Base):
             log_step("WARNING",
                     f"proj_token_num({proj_token_num}) != qformer.num_queries({Q}). "
                     f"Using Q={Q} to keep injection consistent.")
+
+        if d_q == H:
+            self.llama_proj = nn.Identity()
+            log_step("Projection removed", f"QFormer output already matches LLaMA hidden size H={H}")
+            log_step("Loading Projection Done",
+                    f"d_q={d_q}, H={H}, Q={self.proj_token_num}, identity=True")
+            return
 
         mid = int(proj_mid) if proj_mid is not None else 4
 
@@ -763,6 +772,7 @@ class QRecLLM(Rec2Base):
         num_queries = qformer_config.get("num_queries", 8) if qformer_config is not None else 8
         num_heads = qformer_config.get("num_heads", 8) if qformer_config is not None else 8
         num_layers = qformer_config.get("num_layers", 2) if qformer_config is not None else 2
+        qformer_output_dim = qformer_config.get("qformer_output_dim") if qformer_config is not None else None
         pretrained_qformer = qformer_config.get("qformer_ckpt") if qformer_config is not None else None
 
         model = cls(
@@ -784,6 +794,7 @@ class QRecLLM(Rec2Base):
             num_queries=num_queries,
             num_heads=num_heads,
             num_layers=num_layers,
+            qformer_output_dim=qformer_output_dim,
             lora_config=lora_config,
             proj_mid=proj_mid,
             freeze_lora=freeze_lora,
