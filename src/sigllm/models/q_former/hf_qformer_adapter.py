@@ -115,6 +115,10 @@ class HFQFormerAdapter(nn.Module):
         Returns:
             Query token hidden states of shape [B, num_queries, d_model]
         """
+        # Step 0: Validate the input contract.
+        # cf_vec is one CF item/history representation per sample, while
+        # ins_token_emb is the token-level instruction representation produced
+        # by the frozen text encoder.
         if cf_vec.dim() != 2:
             raise ValueError(f"Expected cf_vec to have shape [B, d_cf], got {tuple(cf_vec.shape)}")
         if ins_token_emb.dim() != 3:
@@ -134,12 +138,25 @@ class HFQFormerAdapter(nn.Module):
 
         batch_size = cf_vec.size(0)
 
+        # Step 1: Expand the learnable query tokens for the current batch.
+        # self.q has shape [1, Q, d_model]; query_tokens becomes [B, Q, d_model].
         query_tokens = self.q.expand(batch_size, -1, -1)
         query_count = query_tokens.size(1)
+
+        # Step 2: Put instruction tokens in the Q-Former self-attention stream.
+        # This follows the InstructBLIP-style design: learned queries can attend
+        # to instruction tokens before/while reading the external encoder source.
+        # Shape: [B, Q + T, d_model].
         query_embeds = torch.cat([query_tokens, ins_token_emb], dim=1)
+
+        # Step 3: Project the CF vector into the Q-Former hidden size and expose
+        # it as the cross-attention source. Shape: [B, 1, d_model].
         cf_token = self.proj_cf(cf_vec).unsqueeze(1)
         encoder_hidden_states = cf_token
 
+        # Step 4: Build full attention masks. There is no padding here because
+        # TextEncoder already returns padded embeddings as dense vectors and this
+        # adapter receives no text attention mask, so every input token is visible.
         query_attention_mask = torch.ones(
             batch_size, query_embeds.size(1), dtype=torch.long, device=cf_vec.device
         )
@@ -147,6 +164,10 @@ class HFQFormerAdapter(nn.Module):
             batch_size, encoder_hidden_states.size(1), dtype=torch.long, device=cf_vec.device
         )
 
+        # Step 5: Run the HF BLIP-2 Q-Former.
+        # - query_embeds participate in self-attention.
+        # - encoder_hidden_states are read through cross-attention.
+        # Output shape before slicing: [B, Q + T, d_model].
         outputs = self.qformer(
             query_embeds=query_embeds,
             attention_mask=query_attention_mask,
@@ -154,4 +175,8 @@ class HFQFormerAdapter(nn.Module):
             encoder_attention_mask=encoder_attention_mask,
             return_dict=True,
         )
+
+        # Step 6: Return only the learned query outputs.
+        # Instruction token outputs are conditioning context, not soft tokens to
+        # pass into the downstream loss/LLM projection.
         return outputs.last_hidden_state[:, :query_count]
