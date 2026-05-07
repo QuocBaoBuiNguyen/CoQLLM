@@ -652,7 +652,6 @@ class QRecLLM(Rec2Base):
             return model(
                 inputs_embeds=embeds,
                 attention_mask=atts,
-                labels=targets,
                 return_dict=True
             )
 
