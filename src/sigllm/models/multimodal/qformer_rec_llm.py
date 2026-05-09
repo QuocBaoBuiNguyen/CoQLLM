@@ -73,7 +73,7 @@ class QRecLLM(Rec2Base):
         llama_model="",
         prompt_path="",
         prompt_template="",
-        max_txt_len=32,
+        max_txt_len=1024,
         end_sym='\n',
         proj_token_num=1, # the number of tokens that the user/item embedding projected to
         proj_drop=0,
@@ -782,7 +782,7 @@ class QRecLLM(Rec2Base):
         freeze_lora = cfg.get("freeze_lora")
         prompt_path = cfg.get("prompt_path", "")
         prompt_template = cfg.get("prompt_template", "")
-        max_txt_len = cfg.get("max_txt_len", 32)
+        max_txt_len = cfg.get("max_txt_len", 1024)
         end_sym = cfg.get("end_sym", '\n')
         num_queries = qformer_config.get("num_queries", 8)
         num_heads = qformer_config.get("num_heads", 8)
