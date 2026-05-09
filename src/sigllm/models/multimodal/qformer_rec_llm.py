@@ -664,17 +664,31 @@ class QRecLLM(Rec2Base):
 
     def calculate_recommendation_loss(self, outputs, label_tokens, batch_data, ans_map):
         pos_id = self.llama_tokenizer(ans_map[1], add_special_tokens=False).input_ids[0]
+        neg_id = self.llama_tokenizer(ans_map[0], add_special_tokens=False).input_ids[0]
         label_seq_len = label_tokens.input_ids.shape[-1]
         
         prediction_logits = outputs.logits[:, -(label_seq_len + 1), :]
-        target_logits = prediction_logits[:, pos_id]
-        
-        loss = nn.functional.binary_cross_entropy_with_logits(
-            target_logits, 
-            batch_data['label'].float()
+        binary_logits = torch.stack(
+            [prediction_logits[:, neg_id], prediction_logits[:, pos_id]],
+            dim=1,
         )
+        labels = batch_data['label'].long()
+        
+        loss = nn.functional.cross_entropy(binary_logits, labels)
         
         return loss
+
+    def recommendation_scores(self, outputs, label_tokens, ans_map):
+        pos_id = self.llama_tokenizer(ans_map[1], add_special_tokens=False).input_ids[0]
+        neg_id = self.llama_tokenizer(ans_map[0], add_special_tokens=False).input_ids[0]
+        label_seq_len = label_tokens.input_ids.shape[-1]
+
+        prediction_logits = outputs.logits[:, -(label_seq_len + 1), :]
+        binary_logits = torch.stack(
+            [prediction_logits[:, neg_id], prediction_logits[:, pos_id]],
+            dim=1,
+        )
+        return torch.softmax(binary_logits, dim=1)[:, 1]
 
     def build_llm_outputs_from_labels(self, batch_data):
         device = batch_data['UserID'].device
@@ -722,10 +736,7 @@ class QRecLLM(Rec2Base):
         outputs = self.execute_llm_forward(full_embeds, full_atts, targets)
         loss = self.calculate_recommendation_loss(outputs, label_tokens, samples, ans_map)
 
-        pos_id = self.llama_tokenizer(ans_map[1], add_special_tokens=False).input_ids[0]
-        label_seq_len = label_tokens.input_ids.shape[-1]
-        logits = outputs.logits[:, -(label_seq_len + 1), :][:, pos_id]
-        logits = torch.sigmoid(logits)
+        logits = self.recommendation_scores(outputs, label_tokens, ans_map)
 
         if return_all:
             return outputs, logits
