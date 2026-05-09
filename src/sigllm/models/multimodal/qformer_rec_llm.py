@@ -14,7 +14,6 @@ from sigllm.common.registry import registry
 from sigllm.models.multimodal.base.rec_base_model import Rec2Base
 # from sigllm.models.q_former.q_former import QFormer
 from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
-from sigllm.models.q_former.text_encoder import TextEncoder
 
 LOGGER = NotebookLogger.rich_logger("sigllm.rec_base_model")
 
@@ -83,7 +82,10 @@ class QRecLLM(Rec2Base):
         num_queries=8,
         num_heads=8,
         num_layers=2,
+        qformer_d_model=768,
         qformer_output_dim=None,
+        qformer_text_model_name="bert-base-uncased",
+        max_instruction_length=48,
         lora_config=None,
         proj_mid=5,
         freeze_lora=False,
@@ -106,25 +108,25 @@ class QRecLLM(Rec2Base):
         # Initialize components
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model, low_resource, device_8bit)
-        self.text_encoder, d_model = self._init_text_encoder(freeze_text_encoder=True)
-        self._init_qformer(d_cf=rec_config.embedding_size, d_model=d_model, num_queries=num_queries, num_heads=num_heads, num_layers=num_layers, qformer_output_dim=qformer_output_dim, pretrained_qformer=pretrained_qformer, freeze_qformer=False)
+        d_model = int(qformer_d_model)
+        log_step(
+            "Using Q-Former tokenizer for instructions",
+            f"tokenizer={qformer_text_model_name}, hidden_size={d_model}",
+        )
+        self._init_qformer(
+            d_cf=rec_config.embedding_size,
+            d_model=d_model,
+            num_queries=num_queries,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            qformer_output_dim=qformer_output_dim,
+            pretrained_qformer=pretrained_qformer,
+            freeze_qformer=False,
+            qformer_text_model_name=qformer_text_model_name,
+            max_instruction_length=max_instruction_length,
+        )
         self._init_projection(proj_mid, proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
-
-    def _init_text_encoder(self, freeze_text_encoder: bool):
-        """
-        Initializes the TextEncoder.
-        """
-        text_encoder = TextEncoder(model_name="bert-base-uncased")
-        
-        # Freeze if necessary
-        if freeze_text_encoder:
-            for p in text_encoder.parameters():
-                p.requires_grad = False
-            text_encoder.eval()
-            text_encoder.train = disabled_train.__get__(text_encoder, TextEncoder)
-
-        return text_encoder, text_encoder.model.config.hidden_size
 
     def _init_rec_model(self, rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec):
         log_step("Loading Rec_model")
@@ -189,8 +191,19 @@ class QRecLLM(Rec2Base):
     #         for name, param in self.llama_model_lora.named_parameters():
     #             param.requires_grad = False
 
-    def _init_qformer(self, d_cf, d_model, num_queries, num_heads, num_layers, qformer_output_dim,
-                    pretrained_qformer: str, freeze_qformer: bool):
+    def _init_qformer(
+        self,
+        d_cf,
+        d_model,
+        num_queries,
+        num_heads,
+        num_layers,
+        qformer_output_dim,
+        pretrained_qformer: str,
+        freeze_qformer: bool,
+        qformer_text_model_name: str,
+        max_instruction_length: int,
+    ):
         log_step("Loading QFormer")
 
         # 1) init qformer kiến trúc giống stage1
@@ -208,6 +221,8 @@ class QRecLLM(Rec2Base):
             num_heads=num_heads,
             num_layers=num_layers,
             output_dim=qformer_output_dim or self.llama_model.config.hidden_size,
+            qformer_text_model_name=qformer_text_model_name,
+            max_instruction_length=max_instruction_length,
         ).to(self.device)
 
         # 2) load checkpoint stage1
@@ -441,9 +456,12 @@ class QRecLLM(Rec2Base):
                 "instruction",
                 ["Use the interaction history to predict whether the user will like the target movie."] * B,
             )
-        ins_list = instruction_list
-        ins_tok_emb, _ = self.text_encoder(ins_list, device, max_len=48)  # h:[B,L,d_model], pooled:[B,d_model]
-        # NOTE: assume TextEncoder returns (h, pooled) like stage1
+        if isinstance(instruction_list, str):
+            ins_list = [instruction_list] * B
+        else:
+            ins_list = list(instruction_list)
+        if len(ins_list) != B:
+            raise ValueError(f"Expected {B} instructions, got {len(ins_list)}")
 
         with self.maybe_autocast():
             # Stage-2 uses the in-tree rec encoder API: direct embedding lookup from ids.
@@ -454,8 +472,8 @@ class QRecLLM(Rec2Base):
             target_cf = self.rec_encoder.item_encoder(batch_data["TargetItemID"])  # [B,d_cf]
 
             # 2) QFormer outputs (instruction-conditioned)
-            # user_q = self.qformer(user_cf, ins_tok_emb)        # [B,Q,d_model]
-            target_q = self.qformer(target_cf, ins_tok_emb)    # [B,Q,d_model]
+            # user_q = self.qformer(user_cf, ins_list)        # [B,Q,d_model]
+            target_q = self.qformer(target_cf, ins_list)      # [B,Q,d_model]
 
             # 3) Project to LLM hidden per token
             # user_llama = self.llama_proj(user_q)               # [B,Q,H]
@@ -478,9 +496,9 @@ class QRecLLM(Rec2Base):
 
                 inter_cf = self.rec_encoder.item_encoder(ids)                              # [B,L,d_cf]
                 inter_cf_flat = inter_cf.reshape(B * L, -1)                               # [B*L,d_cf]
-                ins_rep = ins_tok_emb.repeat_interleave(L, dim=0)                         # [B*L,L_ins,d_model]
+                inter_ins_list = [ins for ins in ins_list for _ in range(L)]               # len B*L
 
-                inter_q_flat = self.qformer(inter_cf_flat, ins_rep)                       # [B*L,Q,d_model]
+                inter_q_flat = self.qformer(inter_cf_flat, inter_ins_list)                 # [B*L,Q,d_model]
                 inter_llama_flat2 = self.llama_proj(inter_q_flat)                         # [B*L,Q,H]
                 inter_llama = inter_llama_flat2.reshape(B, L, Q, H)                       # [B,L,Q,H]
                 interacted_llama_flat = inter_llama.reshape(B, L * Q, H)                  # [B,L*Q,H]
@@ -754,7 +772,7 @@ class QRecLLM(Rec2Base):
         freeze_rec = cfg.get("freeze_rec",True)
         rec_precision = cfg.get("rec_precision", 'fp16')
         rec_config = cfg.get("rec_config")
-        qformer_config = cfg.get("qformer_config")
+        qformer_config = cfg.get("qformer_config") or {}
         lora_config = cfg.get("lora_config")
         llama_model = cfg.get("llama_model")
         proj_token_num = cfg.get("proj_token_num")
@@ -768,11 +786,14 @@ class QRecLLM(Rec2Base):
         prompt_template = cfg.get("prompt_template", "")
         max_txt_len = cfg.get("max_txt_len", 32)
         end_sym = cfg.get("end_sym", '\n')
-        num_queries = qformer_config.get("num_queries", 8) if qformer_config is not None else 8
-        num_heads = qformer_config.get("num_heads", 8) if qformer_config is not None else 8
-        num_layers = qformer_config.get("num_layers", 2) if qformer_config is not None else 2
-        qformer_output_dim = qformer_config.get("qformer_output_dim") if qformer_config is not None else None
-        pretrained_qformer = qformer_config.get("qformer_ckpt") if qformer_config is not None else None
+        num_queries = qformer_config.get("num_queries", 8)
+        num_heads = qformer_config.get("num_heads", 8)
+        num_layers = qformer_config.get("num_layers", 2)
+        qformer_d_model = qformer_config.get("qformer_d_model", 768)
+        qformer_output_dim = qformer_config.get("qformer_output_dim")
+        pretrained_qformer = qformer_config.get("qformer_ckpt")
+        qformer_text_model_name = qformer_config.get("qformer_text_model_name", "bert-base-uncased")
+        max_instruction_length = qformer_config.get("max_instruction_length", 48)
 
         model = cls(
             rec_model=rec_model,
@@ -793,7 +814,10 @@ class QRecLLM(Rec2Base):
             num_queries=num_queries,
             num_heads=num_heads,
             num_layers=num_layers,
+            qformer_d_model=qformer_d_model,
             qformer_output_dim=qformer_output_dim,
+            qformer_text_model_name=qformer_text_model_name,
+            max_instruction_length=max_instruction_length,
             lora_config=lora_config,
             proj_mid=proj_mid,
             freeze_lora=freeze_lora,

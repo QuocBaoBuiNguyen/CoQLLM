@@ -33,6 +33,8 @@ model:
     qformer_ckpt: "${run.qformer_stage1.output_dir}${run.qformer_stage1.best_qformer_weights_name}" # Exported best QFormer weights from stage 1 for stage 2
     qformer_d_model: 768
     qformer_output_dim: null # null = derive from llama_model hidden_size; set manually if needed
+    qformer_text_model_name: "bert-base-uncased"
+    max_instruction_length: 48
     num_queries: 8
     num_heads: 8
     num_layers: 2
@@ -79,7 +81,10 @@ run:
     num_queries: ${model.qformer_config.num_queries}
     num_heads: ${model.qformer_config.num_heads}
     num_layers: ${model.qformer_config.num_layers}
+    qformer_d_model: ${model.qformer_config.qformer_d_model}
     qformer_output_dim: ${model.qformer_config.qformer_output_dim}
+    qformer_text_model_name: ${model.qformer_config.qformer_text_model_name}
+    max_instruction_length: ${model.qformer_config.max_instruction_length}
     llama_model_name: ${model.llama_model}
     item_pair_window: 2
     max_item_item_pairs: null

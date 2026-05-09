@@ -4,29 +4,31 @@ from torch.nn import Parameter
 from typing import Optional
 
 try:
-    from transformers import Blip2QFormerConfig, Blip2QFormerModel
-except ModuleNotFoundError:  # pragma: no cover - depends on runtime env
-    Blip2QFormerConfig = None
-    Blip2QFormerModel = None
+    from transformers import AutoTokenizer, InstructBlipQFormerConfig, InstructBlipQFormerModel
+except (ImportError, ModuleNotFoundError):  # pragma: no cover - depends on runtime env
+    AutoTokenizer = None
+    InstructBlipQFormerConfig = None
+    InstructBlipQFormerModel = None
 
 
 class HFQFormerAdapter(nn.Module):
     """
-    Adapter wrapper around Hugging Face BLIP-2 Q-Former.
+    Adapter wrapper around Hugging Face InstructBLIP Q-Former.
 
-    This class preserves the same public I/O as the current local QFormer:
+    The preferred I/O mirrors InstructBLIP: instruction text is tokenized by
+    a Q-Former tokenizer and fed to the Q-Former text stream, while learned
+    query tokens read the recommendation signal through cross-attention.
 
         input:
             cf_vec:        [B, d_cf]
-            ins_token_emb: [B, T, d_model]
+            instruction:   str or list[str]
 
         output:
             q_tokens:      [B, num_queries, d_model]
 
-    Internally, it reshapes the current inputs into the format expected by
-    `Blip2QFormerModel`:
-
-    - learned query tokens + instruction embeddings -> `query_embeds`
+    Internally:
+    - instruction text -> Q-Former input_ids / attention_mask
+    - learned query tokens -> `query_embeds`
     - projected CF vector -> `encoder_hidden_states`
 
     This follows the InstructBLIP feature-extraction pattern: instructions
@@ -49,25 +51,33 @@ class HFQFormerAdapter(nn.Module):
         intermediate_size: Optional[int] = None,
         cross_attention_frequency: int = 1,
         initializer_range: float = 0.02,
+        qformer_text_model_name: str = "bert-base-uncased",
+        max_instruction_length: int = 48,
     ):
         super().__init__()
 
-        if Blip2QFormerConfig is None or Blip2QFormerModel is None:
+        if AutoTokenizer is None or InstructBlipQFormerConfig is None or InstructBlipQFormerModel is None:
             raise ModuleNotFoundError(
-                "transformers is required to use HFQFormerAdapter. "
-                "Please install transformers in the runtime environment."
+                "transformers with InstructBLIP support is required to use HFQFormerAdapter. "
+                "Please install or upgrade transformers in the runtime environment."
             )
 
         self.d_cf = d_cf
         self.d_model = d_model
         self.num_queries = num_queries
         self.output_dim = int(output_dim) if output_dim is not None else d_model
+        self.max_instruction_length = int(max_instruction_length)
+        self.qformer_tokenizer = AutoTokenizer.from_pretrained(
+            qformer_text_model_name,
+            truncation_side="right",
+        )
 
         self.q = Parameter(torch.randn(1, num_queries, d_model))
         self.proj_cf = nn.Linear(d_cf, d_model)
         self.out_proj = nn.Identity() if self.output_dim == d_model else nn.Linear(d_model, self.output_dim)
 
-        config = Blip2QFormerConfig(
+        config = InstructBlipQFormerConfig(
+            vocab_size=len(self.qformer_tokenizer),
             hidden_size=d_model,
             encoder_hidden_size=d_model,
             num_hidden_layers=num_layers,
@@ -76,10 +86,9 @@ class HFQFormerAdapter(nn.Module):
             hidden_dropout_prob=dropout,
             attention_probs_dropout_prob=dropout,
             cross_attention_frequency=cross_attention_frequency,
-            use_qformer_text_input=False,
             initializer_range=initializer_range,
         )
-        self.qformer = Blip2QFormerModel(config)
+        self.qformer = InstructBlipQFormerModel(config)
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """
@@ -109,78 +118,56 @@ class HFQFormerAdapter(nn.Module):
 
         return super().load_state_dict(remapped_state_dict, strict=strict)
 
-    def forward(self, cf_vec: torch.Tensor, ins_token_emb: torch.Tensor) -> torch.Tensor:
+    def _tokenize_instruction(self, instruction, device):
+        tokens = self.qformer_tokenizer(
+            instruction,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=self.max_instruction_length,
+        )
+        return tokens.input_ids.to(device), tokens.attention_mask.to(device)
+
+    def forward(self, cf_vec: torch.Tensor, instruction) -> torch.Tensor:
         """
         Args:
             cf_vec: recommendation embedding of shape [B, d_cf]
-            ins_token_emb: instruction token embeddings of shape [B, T, d_model]
+            instruction: instruction strings consumed by the Q-Former tokenizer
 
         Returns:
             Query token hidden states of shape [B, num_queries, d_model]
         """
-        # Step 0: Validate the input contract.
-        # cf_vec is one CF item/history representation per sample, while
-        # ins_token_emb is the token-level instruction representation produced
-        # by the frozen text encoder.
         if cf_vec.dim() != 2:
             raise ValueError(f"Expected cf_vec to have shape [B, d_cf], got {tuple(cf_vec.shape)}")
-        if ins_token_emb.dim() != 3:
-            raise ValueError(
-                f"Expected ins_token_emb to have shape [B, T, d_model], got {tuple(ins_token_emb.shape)}"
-            )
-        if ins_token_emb.size(-1) != self.d_model:
-            raise ValueError(
-                f"Expected ins_token_emb last dim to equal d_model={self.d_model}, "
-                f"got {ins_token_emb.size(-1)}"
-            )
-        if cf_vec.size(0) != ins_token_emb.size(0):
-            raise ValueError(
-                f"Batch size mismatch: cf_vec has B={cf_vec.size(0)} while "
-                f"ins_token_emb has B={ins_token_emb.size(0)}"
-            )
 
         batch_size = cf_vec.size(0)
-
-        # Step 1: Expand the learnable query tokens for the current batch.
-        # self.q has shape [1, Q, d_model]; query_tokens becomes [B, Q, d_model].
         query_tokens = self.q.expand(batch_size, -1, -1)
         query_count = query_tokens.size(1)
 
-        # Step 2: Put instruction tokens in the Q-Former self-attention stream.
-        # This follows the InstructBLIP-style design: learned queries can attend
-        # to instruction tokens before/while reading the external encoder source.
-        # Shape: [B, Q + T, d_model].
-        query_embeds = torch.cat([query_tokens, ins_token_emb], dim=1)
+        input_ids, text_attention_mask = self._tokenize_instruction(instruction, cf_vec.device)
+        if input_ids.size(0) != batch_size:
+            raise ValueError(
+                f"Batch size mismatch: cf_vec has B={batch_size} while "
+                f"instruction has B={input_ids.size(0)}"
+            )
 
-        # Step 3: Project the CF vector into the Q-Former hidden size and expose
-        # it as the cross-attention source. Shape: [B, 1, d_model].
-        cf_token = self.proj_cf(cf_vec).unsqueeze(1)
-        encoder_hidden_states = cf_token
-
-        # Step 4: Build full attention masks. There is no padding here because
-        # TextEncoder already returns padded embeddings as dense vectors and this
-        # adapter receives no text attention mask, so every input token is visible.
-        query_attention_mask = torch.ones(
-            batch_size, query_embeds.size(1), dtype=torch.long, device=cf_vec.device
-        )
+        encoder_hidden_states = self.proj_cf(cf_vec).unsqueeze(1)
         encoder_attention_mask = torch.ones(
             batch_size, encoder_hidden_states.size(1), dtype=torch.long, device=cf_vec.device
         )
+        query_attention_mask = torch.ones(
+            batch_size, query_count, dtype=torch.long, device=cf_vec.device
+        )
+        qformer_attention_mask = torch.cat([query_attention_mask, text_attention_mask], dim=1)
 
-        # Step 5: Run the HF BLIP-2 Q-Former.
-        # - query_embeds participate in self-attention.
-        # - encoder_hidden_states are read through cross-attention.
-        # Output shape before slicing: [B, Q + T, d_model].
         outputs = self.qformer(
-            query_embeds=query_embeds,
-            attention_mask=query_attention_mask,
+            input_ids=input_ids,
+            query_embeds=query_tokens,
+            attention_mask=qformer_attention_mask,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
             return_dict=True,
         )
 
-        # Step 6: Return only the learned query outputs.
-        # Instruction token outputs are conditioning context, not soft tokens to
-        # pass into the downstream loss/LLM projection.
         query_outputs = outputs.last_hidden_state[:, :query_count]
         return self.out_proj(query_outputs)

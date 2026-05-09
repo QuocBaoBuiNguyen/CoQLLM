@@ -135,6 +135,8 @@ def _init_qformer(cfg, d_model, device):
         num_heads=cfg.num_heads, 
         num_layers=cfg.num_layers,
         output_dim=int(qformer_output_dim),
+        qformer_text_model_name=cfg.get("qformer_text_model_name", cfg.text_model_name),
+        max_instruction_length=cfg.get("max_instruction_length", 48),
     ).to(device)
 
 
@@ -352,8 +354,9 @@ def train_qformer_stage1_representation(cfg):
     test_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "test_qformer_ood2.pkl"), shuffle=False)
     
     mf = _init_rec_model(cfg, device)
-    text_encoder, d_model = _init_text_encoder(cfg, device)
-    qformer = _init_qformer(cfg, d_model, device)
+    text_encoder, text_d_model = _init_text_encoder(cfg, device)
+    qformer_d_model = int(cfg.get("qformer_d_model", text_d_model))
+    qformer = _init_qformer(cfg, qformer_d_model, device)
 
     model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
     opt = _init_optimizer(model, cfg.lr, weight_decay=cfg.weight_decay)

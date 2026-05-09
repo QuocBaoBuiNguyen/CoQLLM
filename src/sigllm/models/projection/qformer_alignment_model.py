@@ -19,8 +19,7 @@ class QRecInstructAlignmentModel(nn.Module):
         return q_tokens.mean(dim=1)
 
     def ins_tokens(self, ins_list, device):
-        h, pooled = self.text_encoder(ins_list, device, max_len=48)
-        return h
+        return list(ins_list)
 
     def text_vec(self, text_list, device):
         _, pooled = self.text_encoder(text_list, device, max_len=64)
