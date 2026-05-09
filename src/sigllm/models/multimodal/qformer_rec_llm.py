@@ -5,7 +5,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from transformers import LlamaTokenizer, LlamaForCausalLM, BitsAndBytesConfig
+from transformers import LlamaTokenizer, LlamaForCausalLM
 
 import os
 
@@ -75,8 +75,6 @@ class QRecLLM(Rec2Base):
         prompt_template="",
         max_txt_len=32,
         end_sym='\n',
-        low_resource=False,  # use 8 bit and put vit in cpu
-        device_8bit=0,  # the device of 8bit model should be set when loading and cannot be changed anymore.
         proj_token_num=1, # the number of tokens that the user/item embedding projected to
         proj_drop=0,
         num_queries=8,
@@ -93,7 +91,6 @@ class QRecLLM(Rec2Base):
     ):
         super().__init__()
 
-        self.low_resource = low_resource
         self.proj_token_num = proj_token_num
         self.use_lora = False
         self._has_logged_trainable_stats = False
@@ -107,7 +104,7 @@ class QRecLLM(Rec2Base):
         
         # Initialize components
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
-        self._init_llm_model(llama_model, low_resource, device_8bit)
+        self._init_llm_model(llama_model)
         d_model = int(qformer_d_model)
         log_step(
             "Using Q-Former tokenizer for instructions",
@@ -145,25 +142,17 @@ class QRecLLM(Rec2Base):
 
         log_step("Loading Rec_model Done")
 
-    def _init_llm_model(self, llama_model, low_resource, device_8bit):
+    def _init_llm_model(self, llama_model):
         log_step(f"Loading LLAMA: {llama_model}")
         model_path = llama_model if llama_model else "./content/ckpt/llm/base"
         
         self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, use_fast=False)
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-        )
-
         self.llama_model = LlamaForCausalLM.from_pretrained(
             model_path,
-            quantization_config=bnb_config,
             device_map="auto",
-            torch_dtype=torch.float16
+            torch_dtype=torch.float16,
         )
         
         for name, param in self.llama_model.named_parameters():
@@ -780,8 +769,6 @@ class QRecLLM(Rec2Base):
         proj_mid = cfg.get("proj_mid_times")
         freeze_proj = cfg.get("freeze_proj")
         freeze_lora = cfg.get("freeze_lora")
-        low_resource = cfg.get("low_resource", False)
-        device_8bit = cfg.get("device_8bit", 0)
         prompt_path = cfg.get("prompt_path", "")
         prompt_template = cfg.get("prompt_template", "")
         max_txt_len = cfg.get("max_txt_len", 32)
@@ -807,8 +794,6 @@ class QRecLLM(Rec2Base):
             prompt_template=prompt_template,
             max_txt_len=max_txt_len,
             end_sym=end_sym,
-            low_resource=low_resource,
-            device_8bit=device_8bit,
             proj_token_num=proj_token_num,
             proj_drop=proj_drop,
             num_queries=num_queries,
