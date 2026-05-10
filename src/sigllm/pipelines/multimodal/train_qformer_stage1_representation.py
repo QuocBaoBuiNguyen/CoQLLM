@@ -7,7 +7,6 @@ import omegaconf
 import os
 import numpy as np
 from typing import Optional
-from transformers import AutoConfig
 
 from sigllm.common import NotebookLogger, EarlyStopping
 from sigllm.common.config import Config
@@ -119,7 +118,7 @@ def _init_qformer(cfg, d_model, device):
     """
     qformer_output_dim = cfg.qformer_output_dim
     if qformer_output_dim is None:
-        qformer_output_dim = AutoConfig.from_pretrained(cfg.llama_model_name).hidden_size
+        qformer_output_dim = d_model
 
     # return QFormer(
     #     d_cf=cfg.embedding_size,

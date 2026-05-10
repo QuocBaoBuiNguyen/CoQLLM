@@ -105,14 +105,9 @@ class QRecLLM(Rec2Base):
         # Initialize components
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model)
-        d_model = int(qformer_d_model)
-        log_step(
-            "Using Q-Former tokenizer for instructions",
-            f"tokenizer={qformer_text_model_name}, hidden_size={d_model}",
-        )
         self._init_qformer(
             d_cf=rec_config.embedding_size,
-            d_model=d_model,
+            d_model=qformer_d_model,
             num_queries=num_queries,
             num_heads=num_heads,
             num_layers=num_layers,
@@ -194,6 +189,10 @@ class QRecLLM(Rec2Base):
         max_instruction_length: int,
     ):
         log_step("Loading QFormer")
+        log_step(
+            "Using Q-Former tokenizer for instructions",
+            f"tokenizer={qformer_text_model_name}, hidden_size={d_model}",
+        )
 
         # 1) init qformer kiến trúc giống stage1
         # self.qformer = QFormer(
@@ -209,7 +208,7 @@ class QRecLLM(Rec2Base):
             num_queries=num_queries,
             num_heads=num_heads,
             num_layers=num_layers,
-            output_dim=qformer_output_dim or self.llama_model.config.hidden_size,
+            output_dim=qformer_output_dim or d_model,
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
         ).to(self.device)
@@ -280,14 +279,15 @@ class QRecLLM(Rec2Base):
                     f"d_q={d_q}, H={H}, Q={self.proj_token_num}, identity=True")
             return
 
-        mid = int(proj_mid) if proj_mid is not None else 4
+        mid = int(proj_mid) if proj_mid is not None else 1
+        hidden = d_q * mid
 
         # per-token projection: [B,Q,d_q] -> [B,Q,H]
         self.llama_proj = nn.Sequential(
             nn.LayerNorm(d_q),
-            nn.Linear(d_q, d_q * mid),
+            nn.Linear(d_q, hidden),
             nn.GELU(),
-            nn.Linear(d_q * mid, H),
+            nn.Linear(hidden, H),
         )
 
         if freeze_proj:
@@ -298,7 +298,7 @@ class QRecLLM(Rec2Base):
             log_step("Freeze llama_proj")
 
         log_step("Loading Projection Done",
-                f"d_q={d_q}, H={H}, Q={self.proj_token_num}, mid={mid}")
+                f"d_q={d_q}, hidden={hidden}, H={H}, Q={self.proj_token_num}, mid={mid}")
 
     def _log_trainable_module_stats(self):
         if self._has_logged_trainable_stats:
