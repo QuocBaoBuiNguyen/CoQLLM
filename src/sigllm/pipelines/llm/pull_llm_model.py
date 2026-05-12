@@ -2,9 +2,14 @@ import os
 import torch
 from transformers import LlamaTokenizer, LlamaForCausalLM
 
-def pull_model(model_path="openlm-research/open_llama_3b", save_dir="./ckpt/llm/base"):
+def pull_model(model_path="lmsys/vicuna-7b-v1.5", save_dir="./ckpt/llm/base"):
     """
-    Download and save the base LLaMA model and tokenizer.
+    Download and save the Vicuna LLaMA-family model and tokenizer.
+
+    Default matches the InstructBLIP paper backbone (Vicuna-7B-v1.5). Vicuna
+    is an instruction-tuned LLaMA-2 derivative, which is required by this
+    pipeline since the LLM is kept frozen (no LoRA) — only an instruction-
+    tuned model can follow the Yes/No prompts at Stage 3.
     """
     print(f"Pulling model from {model_path}...")
     
@@ -52,6 +57,5 @@ def smoke_test_model(model_dir, prompt="Q: What is the largest animal?\nA:", max
     print(tokenizer.decode(generation_output[0], skip_special_tokens=True))
 
 if __name__ == "__main__":
-    # Default to open_llama_3b as seen in the existing snippet
     saved_dir = pull_model()
     smoke_test_model(saved_dir)

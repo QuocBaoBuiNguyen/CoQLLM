@@ -111,6 +111,8 @@ class QRecLLM(Rec2Base):
         self._flow_log_steps = 0
         self._max_flow_log_steps = 3
         self._has_logged_prompt_injection_stats = False
+        self._eval_pred_log_count = 0
+        self._max_eval_pred_log_batches = 20
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -716,10 +718,50 @@ class QRecLLM(Rec2Base):
 
         logits = self.recommendation_scores(outputs, label_tokens, ans_map)
 
+        self._maybe_log_predictions(samples, logits, ans_map)
+
         if return_all:
             return outputs, logits
 
         return {"loss": loss, "logits": logits}
+
+    def _maybe_log_predictions(self, samples, prob_yes, ans_map, samples_per_batch=3):
+        """Emit a compact per-sample log of (UserID, TargetItemID, label,
+        predicted Yes/No, probability). Bounded by
+        ``_max_eval_pred_log_batches`` to avoid log spam; the counter resets
+        at the start of every eval pass (see ``eval``)."""
+
+        if self._eval_pred_log_count >= self._max_eval_pred_log_batches:
+            return
+
+        user_ids = samples["UserID"].detach().cpu().tolist()
+        item_ids = samples["TargetItemID"].detach().cpu().tolist()
+        labels = samples["label"].detach().cpu().tolist()
+        probs = prob_yes.detach().float().cpu().tolist()
+
+        n = min(len(user_ids), samples_per_batch)
+        rows = []
+        for i in range(n):
+            pred = ans_map[1] if probs[i] >= 0.5 else ans_map[0]
+            gt = ans_map[int(labels[i])]
+            outcome = "OK" if pred == gt else "WRONG"
+            rows.append(
+                f"user={user_ids[i]} item={item_ids[i]} "
+                f"gt={gt} prob_yes={probs[i]:.3f} pred={pred} {outcome}"
+            )
+
+        log_step(
+            f"[stage3 eval batch #{self._eval_pred_log_count}]",
+            " | ".join(rows),
+        )
+        self._eval_pred_log_count += 1
+
+    def eval(self):
+        """Reset the prediction-log counter so each eval pass starts logging
+        from sample 0 again. ``train(True)`` does not reset, so logs stay
+        scoped to eval calls."""
+        self._eval_pred_log_count = 0
+        return super().eval()
 
     def forward_v2(self, batch_data):
         prompt = self._sample_prompt()

@@ -3,7 +3,11 @@ model:
   model_type: pretrain_vicuna
   llama_model: "/content/SigLLM/ckpt/llm/base"
   prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie.txt"
-  prompt_template: "{}"
+  # Vicuna-v1.5 conversation template — wraps each raw question from
+  # prompt_path with the system message + USER/ASSISTANT markers Vicuna was
+  # instruction-tuned on. The label ("Yes" / "No") is concatenated right
+  # after "ASSISTANT:".
+  prompt_template: 'A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user''s questions. USER: {} ASSISTANT:'
   
   freeze_rec: True
   freeze_proj: False
