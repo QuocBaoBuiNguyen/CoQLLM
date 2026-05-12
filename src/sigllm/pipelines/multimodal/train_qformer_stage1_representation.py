@@ -13,9 +13,7 @@ from sigllm.common.config import Config
 from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
-# from sigllm.models.q_former.q_former import QFormer
 from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
-from sigllm.models.q_former.text_encoder import TextEncoder
 from sigllm.models.projection.qformer_alignment_model import QRecInstructAlignmentModel
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -96,22 +94,6 @@ def _init_dataset(cfg, filename: str, shuffle: bool = True):
     return loader
 
 
-def _init_text_encoder(cfg, device):
-    """
-    Initializes the TextEncoder.
-    """
-    text_encoder = TextEncoder(model_name=cfg.text_model_name).to(device)
-    
-    # Freeze if necessary
-    if cfg.freeze_text_encoder:
-        for p in text_encoder.parameters():
-            p.requires_grad = False
-        text_encoder.eval()
-        text_encoder.train = disabled_train.__get__(text_encoder, TextEncoder)
-
-    return text_encoder, text_encoder.model.config.hidden_size
-
-
 def _init_qformer(cfg, d_model, device):
     """
     Initializes the Q-Former model.
@@ -120,21 +102,14 @@ def _init_qformer(cfg, d_model, device):
     if qformer_output_dim is None:
         qformer_output_dim = d_model
 
-    # return QFormer(
-    #     d_cf=cfg.embedding_size,
-    #     d_model=d_model,
-    #     num_queries=cfg.num_queries,
-    #     num_heads=cfg.num_heads,
-    #     num_layers=cfg.num_layers
-    # ).to(device)
     return HFQFormerAdapter(
-        d_cf=cfg.embedding_size, 
-        d_model=d_model, 
-        num_queries=cfg.num_queries, 
-        num_heads=cfg.num_heads, 
+        d_cf=cfg.embedding_size,
+        d_model=d_model,
+        num_queries=cfg.num_queries,
+        num_heads=cfg.num_heads,
         num_layers=cfg.num_layers,
         output_dim=int(qformer_output_dim),
-        qformer_text_model_name=cfg.get("qformer_text_model_name", cfg.text_model_name),
+        qformer_text_model_name=cfg.qformer_text_model_name,
         max_instruction_length=cfg.get("max_instruction_length", 48),
     ).to(device)
 
@@ -169,23 +144,6 @@ def _log_batch_preview(batch, prefix: str = "train_step"):
         print(f"[{prefix}] sample[0] text={batch['text'][0]}")
 
 
-def _compute_item_text_metrics(i_pos_vec, t_vec, tau_it: float):
-    """Compute Top-1 accuracy for the temporary item-text-only stage-1 objective."""
-    pos_selected, _ = QRecInstructAlignmentModel.select_query_by_text(i_pos_vec, t_vec)
-    pos = QRecInstructAlignmentModel.l2norm(pos_selected)
-    text = QRecInstructAlignmentModel.l2norm(t_vec)
-
-    it_logits = (pos @ text.T) / tau_it
-    it_labels = torch.arange(pos.size(0), device=pos.device)
-    it_predictions = it_logits.argmax(dim=1)
-    it_top1 = (it_predictions == it_labels).float().mean()
-
-    return {
-        "ui_top1": i_pos_vec.new_zeros(()),
-        "it_top1": it_top1,
-    }
-
-
 def _move_batch_to_device(batch, device):
     for key, value in batch.items():
         if isinstance(value, torch.Tensor):
@@ -212,15 +170,17 @@ def _indices_for_type(batch, sample_type: str, device):
 def train_step(
     batch,
     model: QRecInstructAlignmentModel,
-    w_ui: float = 1.0,
-    w_it: float = 1.0,
+    w_itc: float = 1.0,
+    w_itm: float = 1.0,
+    w_itg: float = 1.0,
     w_ii: float = 1.0,
-    tau_ui: float = 0.07,
+    tau_itc: float = 0.07,
     tau_ii: float = 0.07,
-    tau_it: float = 0.2,
     debug_batch: bool = False,
-    enable_user_item: bool = False,
 ):
+    """BLIP-2 stage-1 step: ITC + ITM + ITG on item-text samples, plus the
+    SigLLM-specific item-item contrastive on co-watch pairs."""
+
     device = batch["i_left"].device
 
     if debug_batch:
@@ -228,44 +188,49 @@ def train_step(
 
     zero = next(model.parameters()).sum() * 0.0
     logs = {
-        "L_it": zero,
+        "L_itc": zero,
+        "L_itm": zero,
+        "L_itg": zero,
         "L_ii": zero,
-        "L_ui": zero,
-        "it_top1": zero.detach(),
+        "itc_top1": zero.detach(),
+        "itm_acc": zero.detach(),
+        "itg_acc": zero.detach(),
         "ii_top1": zero.detach(),
-        "ui_top1": zero.detach(),
     }
     losses = []
 
     item_text_idx = _indices_for_type(batch, "item_text", device)
     if item_text_idx.numel() >= 2:
         item_text_batch = _subset_batch(batch, item_text_idx)
-        ins_tok_emb = model.ins_tokens(item_text_batch["instruction"], device)
-        item_vec = model.enc_item(item_text_batch["i_left"], ins_tok_emb)
-        text_vec = model.text_vec(item_text_batch["text"], device)
-        logs["L_it"] = model.loss_item_text(item_vec, text_vec, tau=tau_it)
-        logs["it_top1"] = _compute_item_text_metrics(item_vec, text_vec, tau_it)["it_top1"]
-        losses.append(w_it * logs["L_it"])
+        item_ids = item_text_batch["i_left"]
+        text_list = item_text_batch["text"]
+
+        loss_itc, sim_matrix, itc_top1 = model.loss_itc(item_ids, text_list, tau=tau_itc)
+        logs["L_itc"] = loss_itc
+        logs["itc_top1"] = itc_top1.detach()
+        losses.append(w_itc * loss_itc)
+
+        if w_itm > 0.0:
+            loss_itm, itm_acc = model.loss_itm(item_ids, text_list, sim_matrix)
+            logs["L_itm"] = loss_itm
+            logs["itm_acc"] = itm_acc.detach()
+            losses.append(w_itm * loss_itm)
+
+        if w_itg > 0.0:
+            loss_itg, itg_acc = model.loss_itg(item_ids, text_list)
+            logs["L_itg"] = loss_itg
+            logs["itg_acc"] = itg_acc.detach()
+            losses.append(w_itg * loss_itg)
 
     item_item_idx = _indices_for_type(batch, "item_item", device)
-    if item_item_idx.numel() >= 2:
+    if w_ii > 0.0 and item_item_idx.numel() >= 2:
         item_item_batch = _subset_batch(batch, item_item_idx)
-        ins_tok_emb = model.ins_tokens(item_item_batch["instruction"], device)
-        left_vec = model.enc_item(item_item_batch["i_left"], ins_tok_emb)
-        right_vec = model.enc_item(item_item_batch["i_right"], ins_tok_emb)
-        logs["L_ii"] = model.loss_item_item_ilm(left_vec, right_vec, tau=tau_ii)
-        logs["ii_top1"] = model.multiquery_inbatch_top1(left_vec, right_vec, tau=tau_ii)
-        losses.append(w_ii * logs["L_ii"])
-
-    user_item_idx = _indices_for_type(batch, "user_item", device)
-    if enable_user_item and w_ui > 0.0 and user_item_idx.numel() >= 2:
-        user_item_batch = _subset_batch(batch, user_item_idx)
-        ins_tok_emb = model.ins_tokens(user_item_batch["instruction"], device)
-        user_vec = model.enc_user(user_item_batch["u"], ins_tok_emb)
-        item_vec = model.enc_item(user_item_batch["i_left"], ins_tok_emb)
-        logs["L_ui"] = model.loss_multiquery_inbatch_symmetric(user_vec, item_vec, tau=tau_ui)
-        logs["ui_top1"] = model.multiquery_inbatch_top1(user_vec, item_vec, tau=tau_ui)
-        losses.append(w_ui * logs["L_ui"])
+        loss_ii, ii_top1 = model.loss_item_item_ilm(
+            item_item_batch["i_left"], item_item_batch["i_right"], tau=tau_ii
+        )
+        logs["L_ii"] = loss_ii
+        logs["ii_top1"] = ii_top1.detach()
+        losses.append(w_ii * loss_ii)
 
     loss = sum(losses, zero)
     return loss, logs
@@ -274,24 +239,25 @@ def train_step(
 def evaluate_loss(
     model,
     loader,
-    w_ui=1.0,
-    w_it=1.0,
+    w_itc=1.0,
+    w_itm=1.0,
+    w_itg=1.0,
     w_ii=1.0,
-    tau_ui=0.07,
+    tau_itc=0.07,
     tau_ii=0.07,
-    tau_it=0.2,
-    enable_user_item: bool = False,
 ):
     model.eval()
     device = next(model.parameters()).device
     totals = {
         "loss": 0.0,
-        "L_it": 0.0,
+        "L_itc": 0.0,
+        "L_itm": 0.0,
+        "L_itg": 0.0,
         "L_ii": 0.0,
-        "L_ui": 0.0,
-        "it_top1": 0.0,
+        "itc_top1": 0.0,
+        "itm_acc": 0.0,
+        "itg_acc": 0.0,
         "ii_top1": 0.0,
-        "ui_top1": 0.0,
     }
     steps = 0
 
@@ -301,19 +267,19 @@ def evaluate_loss(
             loss, logs = train_step(
                 batch,
                 model,
-                w_ui=w_ui,
-                w_it=w_it,
+                w_itc=w_itc,
+                w_itm=w_itm,
+                w_itg=w_itg,
                 w_ii=w_ii,
-                tau_ui=tau_ui,
+                tau_itc=tau_itc,
                 tau_ii=tau_ii,
-                tau_it=tau_it,
-                enable_user_item=enable_user_item,
             )
             totals["loss"] += loss.item()
             for key in logs:
                 totals[key] += logs[key].item()
             steps += 1
 
+    model.train()
     if steps == 0:
         return {key: 0.0 for key in totals}
     return {key: value / steps for key, value in totals.items()}
@@ -353,11 +319,10 @@ def train_qformer_stage1_representation(cfg):
     test_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "test_qformer_ood2.pkl"), shuffle=False)
     
     mf = _init_rec_model(cfg, device)
-    text_encoder, text_d_model = _init_text_encoder(cfg, device)
-    qformer_d_model = int(cfg.get("qformer_d_model", text_d_model))
+    qformer_d_model = int(cfg.get("qformer_d_model", 768))
     qformer = _init_qformer(cfg, qformer_d_model, device)
 
-    model = QRecInstructAlignmentModel(mf, qformer, text_encoder).to(device)
+    model = QRecInstructAlignmentModel(mf, qformer).to(device)
     opt = _init_optimizer(model, cfg.lr, weight_decay=cfg.weight_decay)
 
     outdir = cfg.output_dir
@@ -375,12 +340,14 @@ def train_qformer_stage1_representation(cfg):
         model.train()
         train_totals = {
             "loss": 0.0,
-            "L_it": 0.0,
+            "L_itc": 0.0,
+            "L_itm": 0.0,
+            "L_itg": 0.0,
             "L_ii": 0.0,
-            "L_ui": 0.0,
-            "it_top1": 0.0,
+            "itc_top1": 0.0,
+            "itm_acc": 0.0,
+            "itg_acc": 0.0,
             "ii_top1": 0.0,
-            "ui_top1": 0.0,
         }
         train_steps = 0
         for batch in train_loader:
@@ -390,22 +357,21 @@ def train_qformer_stage1_representation(cfg):
             loss, logs = train_step(
                 batch,
                 model,
-                w_ui=cfg.w_ui,
-                w_it=cfg.w_it,
+                w_itc=cfg.w_itc,
+                w_itm=cfg.w_itm,
+                w_itg=cfg.w_itg,
                 w_ii=cfg.w_ii,
-                tau_ui=cfg.tau_ui,
+                tau_itc=cfg.tau_itc,
                 tau_ii=cfg.tau_ii,
-                tau_it=cfg.tau_it,
                 debug_batch=cfg.debug_batch and epoch == 0 and train_steps < cfg.debug_batch_max_steps,
-                enable_user_item=bool(cfg.get("include_user_item", False)),
             )
             loss.backward()
             opt.step()
-            
+
             train_totals["loss"] += loss.item()
             for key in logs:
                 train_totals[key] += logs[key].item()
-            train_steps += 1    
+            train_steps += 1
 
         if (epoch + 1) % cfg.log_epoch == 0:
             avg_train = {
@@ -415,26 +381,27 @@ def train_qformer_stage1_representation(cfg):
             val_logs = evaluate_loss(
                 model,
                 val_loader,
-                w_ui=cfg.w_ui,
-                w_it=cfg.w_it,
+                w_itc=cfg.w_itc,
+                w_itm=cfg.w_itm,
+                w_itg=cfg.w_itg,
                 w_ii=cfg.w_ii,
-                tau_ui=cfg.tau_ui,
+                tau_itc=cfg.tau_itc,
                 tau_ii=cfg.tau_ii,
-                tau_it=cfg.tau_it,
-                enable_user_item=bool(cfg.get("include_user_item", False)),
             )
             print(
                 f"epoch {epoch+1} | "
-                f"Train Loss={avg_train['loss']:.4f} L_it={avg_train['L_it']:.4f} "
-                f"L_ii={avg_train['L_ii']:.4f} L_ui={avg_train['L_ui']:.4f} "
-                f"IT@1={avg_train['it_top1']:.4f} II@1={avg_train['ii_top1']:.4f} "
-                f"UI@1={avg_train['ui_top1']:.4f} | "
-                f"Val Loss={val_logs['loss']:.4f} L_it={val_logs['L_it']:.4f} "
-                f"L_ii={val_logs['L_ii']:.4f} L_ui={val_logs['L_ui']:.4f} "
-                f"IT@1={val_logs['it_top1']:.4f} II@1={val_logs['ii_top1']:.4f} "
-                f"UI@1={val_logs['ui_top1']:.4f} | "
-                f"w_it={cfg.w_it:.3f} w_ii={cfg.w_ii:.3f} w_ui={cfg.w_ui:.3f} "
-                f"tau_it={cfg.tau_it:.3f} tau_ii={cfg.tau_ii:.3f} tau_ui={cfg.tau_ui:.3f}"
+                f"Train Loss={avg_train['loss']:.4f} "
+                f"L_itc={avg_train['L_itc']:.4f} L_itm={avg_train['L_itm']:.4f} "
+                f"L_itg={avg_train['L_itg']:.4f} L_ii={avg_train['L_ii']:.4f} "
+                f"ITC@1={avg_train['itc_top1']:.4f} ITM_acc={avg_train['itm_acc']:.4f} "
+                f"ITG_acc={avg_train['itg_acc']:.4f} II@1={avg_train['ii_top1']:.4f} | "
+                f"Val Loss={val_logs['loss']:.4f} "
+                f"L_itc={val_logs['L_itc']:.4f} L_itm={val_logs['L_itm']:.4f} "
+                f"L_itg={val_logs['L_itg']:.4f} L_ii={val_logs['L_ii']:.4f} "
+                f"ITC@1={val_logs['itc_top1']:.4f} ITM_acc={val_logs['itm_acc']:.4f} "
+                f"ITG_acc={val_logs['itg_acc']:.4f} II@1={val_logs['ii_top1']:.4f} | "
+                f"w_itc={cfg.w_itc:.3f} w_itm={cfg.w_itm:.3f} w_itg={cfg.w_itg:.3f} "
+                f"w_ii={cfg.w_ii:.3f} tau_itc={cfg.tau_itc:.3f} tau_ii={cfg.tau_ii:.3f}"
             )
 
             metrics = {
@@ -477,9 +444,10 @@ def train_qformer_stage1_representation(cfg):
             "Loaded best checkpoint",
             (
                 f"epoch={best_checkpoint['epoch']}, val_loss={best_checkpoint['val_loss']:.4f}, "
-                f"it_top1={best_checkpoint.get('val_it_top1', 0.0):.4f}, "
-                f"ii_top1={best_checkpoint.get('val_ii_top1', 0.0):.4f}, "
-                f"ui_top1={best_checkpoint.get('val_ui_top1', 0.0):.4f}"
+                f"itc_top1={best_checkpoint.get('val_itc_top1', 0.0):.4f}, "
+                f"itm_acc={best_checkpoint.get('val_itm_acc', 0.0):.4f}, "
+                f"itg_acc={best_checkpoint.get('val_itg_acc', 0.0):.4f}, "
+                f"ii_top1={best_checkpoint.get('val_ii_top1', 0.0):.4f}"
             ),
         )
 
@@ -488,21 +456,21 @@ def train_qformer_stage1_representation(cfg):
     test_logs = evaluate_loss(
         model,
         test_loader,
-        w_ui=cfg.w_ui,
-        w_it=cfg.w_it,
+        w_itc=cfg.w_itc,
+        w_itm=cfg.w_itm,
+        w_itg=cfg.w_itg,
         w_ii=cfg.w_ii,
-        tau_ui=cfg.tau_ui,
+        tau_itc=cfg.tau_itc,
         tau_ii=cfg.tau_ii,
-        tau_it=cfg.tau_it,
-        enable_user_item=bool(cfg.get("include_user_item", False)),
     )
     log_step(
         "Test results",
         (
-            f"loss={test_logs['loss']:.4f}, l_it={test_logs['L_it']:.4f}, "
-            f"l_ii={test_logs['L_ii']:.4f}, l_ui={test_logs['L_ui']:.4f}, "
-            f"it@1={test_logs['it_top1']:.4f}, ii@1={test_logs['ii_top1']:.4f}, "
-            f"ui@1={test_logs['ui_top1']:.4f}"
+            f"loss={test_logs['loss']:.4f}, l_itc={test_logs['L_itc']:.4f}, "
+            f"l_itm={test_logs['L_itm']:.4f}, l_itg={test_logs['L_itg']:.4f}, "
+            f"l_ii={test_logs['L_ii']:.4f}, itc@1={test_logs['itc_top1']:.4f}, "
+            f"itm_acc={test_logs['itm_acc']:.4f}, itg_acc={test_logs['itg_acc']:.4f}, "
+            f"ii@1={test_logs['ii_top1']:.4f}"
         ),
     )
 
@@ -535,14 +503,13 @@ def main():
         "num_heads",
         "num_layers",
         "qformer_output_dim",
-        "llama_model_name",
         "lr",
-        "w_ui",
-        "w_it",
+        "w_itc",
+        "w_itm",
+        "w_itg",
         "w_ii",
-        "tau_ui",
+        "tau_itc",
         "tau_ii",
-        "tau_it",
         "weight_decay",
         "debug_batch",
         "debug_batch_max_steps",
@@ -552,10 +519,8 @@ def main():
         "best_qformer_weights_name",
         "log_epoch",
         "epoch",
-        "text_model_name",
         "pretrained_rec_path",
         "freeze_rec",
-        "freeze_text_encoder",
         "output_dir",
         "seed",
     ]

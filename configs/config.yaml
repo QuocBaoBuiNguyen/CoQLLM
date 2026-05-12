@@ -7,24 +7,16 @@ model:
   
   freeze_rec: True
   freeze_proj: False
-  freeze_lora: False
-  
+
   max_txt_len: 1024
   end_sym: "###"
   ans_type: "v2"
-  
+
   proj_token_num: ${model.qformer_config.num_queries}
 
   rec_model: "MF"
   user_num: -100
   item_num: -100
-
-  lora_config:
-    use_lora: True
-    r: 8
-    alpha: 16
-    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
-    dropout: 0.05
 
   qformer_config:
     use_qformer: True
@@ -71,6 +63,9 @@ run:
     patience: 100
     batch_size: 1024
   qformer_stage1:
+    # BLIP-2 representation pretraining: ITC + ITM + ITG using the Q-Former's
+    # own text branch (no external BERT). Item-item contrastive (w_ii) is a
+    # SigLLM-specific addition for co-watch collaborative signal.
     seed: 2025
     batch_size: 256
     num_workers: 4
@@ -84,18 +79,17 @@ run:
     qformer_output_dim: ${model.qformer_config.qformer_output_dim}
     qformer_text_model_name: ${model.qformer_config.qformer_text_model_name}
     max_instruction_length: ${model.qformer_config.max_instruction_length}
-    llama_model_name: ${model.llama_model}
     item_pair_window: 2
     max_item_item_pairs: null
     max_user_item_pairs: null
     include_user_item: False
     lr: 2e-4
-    w_ui: 0.0
-    w_it: 1.0
+    w_itc: 1.0
+    w_itm: 1.0
+    w_itg: 1.0
     w_ii: 1.0
-    tau_ui: 0.05
+    tau_itc: 0.07
     tau_ii: 0.05
-    tau_it: 0.10
     weight_decay: 1e-3
     debug_batch: True
     debug_batch_max_steps: 10
@@ -105,10 +99,8 @@ run:
     best_qformer_weights_name: "qformer_stage1_best_qformer.pth"
     log_epoch: 1
     epoch: 100
-    text_model_name: "bert-base-uncased"
     pretrained_rec_path: ${model.rec_config.pretrained_path}
     freeze_rec: True
-    freeze_text_encoder: True
     output_dir: "/content/SigLLM/ckpt/qformer_stage1/"
 
   qformer_phase2:
