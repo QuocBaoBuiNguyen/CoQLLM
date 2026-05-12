@@ -111,6 +111,7 @@ def _init_qformer(cfg, device):
         output_dim=int(qformer_output_dim),
         qformer_text_model_name=cfg.qformer_text_model_name,
         max_instruction_length=int(cfg.max_instruction_length),
+        init_from_pretrained_text=False,
     ).to(device)
 
     ckpt_path = cfg.get("qformer_ckpt_in")

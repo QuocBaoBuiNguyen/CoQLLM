@@ -187,14 +187,6 @@ class QRecLLM(Rec2Base):
             f"tokenizer={qformer_text_model_name}, hidden_size={d_model}",
         )
 
-        # 1) init qformer kiến trúc giống stage1
-        # self.qformer = QFormer(
-        #     d_cf=d_cf,
-        #     d_model=d_model,
-        #     num_queries=num_queries,
-        #     num_heads=num_heads,
-        #     num_layers=num_layers
-        # ).to(self.device)
         self.qformer = HFQFormerAdapter(
             d_cf=d_cf,
             d_model=d_model,
@@ -204,19 +196,14 @@ class QRecLLM(Rec2Base):
             output_dim=qformer_output_dim or d_model,
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
+            init_from_pretrained_text=False,
         ).to(self.device)
 
-        # 2) load checkpoint stage1
         if pretrained_qformer and pretrained_qformer != "not_have":
             ckpt = torch.load(pretrained_qformer, map_location="cpu")
-
-            # nếu bạn save thẳng state_dict: ckpt là dict param
             state_dict = ckpt
-
-            # nếu ckpt có prefix "qformer." (trường hợp save full model)
             if isinstance(state_dict, dict) and any(k.startswith("qformer.") for k in state_dict.keys()):
                 state_dict = {k.replace("qformer.", "", 1): v for k, v in state_dict.items()}
-
             self.qformer.load_state_dict(state_dict, strict=True)
             log_step("Successfully loaded QFormer checkpoint", pretrained_qformer)
 

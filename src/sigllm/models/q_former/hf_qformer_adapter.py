@@ -1,14 +1,24 @@
+import logging
+from typing import Optional, Union
+
 import torch
 import torch.nn as nn
 from torch.nn import Parameter
-from typing import Optional, Union
 
 try:
-    from transformers import AutoTokenizer, InstructBlipQFormerConfig, InstructBlipQFormerModel
+    from transformers import (
+        AutoTokenizer,
+        BertModel,
+        InstructBlipQFormerConfig,
+        InstructBlipQFormerModel,
+    )
 except (ImportError, ModuleNotFoundError):  # pragma: no cover - depends on runtime env
     AutoTokenizer = None
+    BertModel = None
     InstructBlipQFormerConfig = None
     InstructBlipQFormerModel = None
+
+LOGGER = logging.getLogger(__name__)
 
 
 class HFQFormerAdapter(nn.Module):
@@ -43,10 +53,11 @@ class HFQFormerAdapter(nn.Module):
         output_dim: Optional[int] = None,
         dropout: float = 0.0,
         intermediate_size: Optional[int] = None,
-        cross_attention_frequency: int = 1,
+        cross_attention_frequency: int = 2,
         initializer_range: float = 0.02,
         qformer_text_model_name: str = "bert-base-uncased",
         max_instruction_length: int = 48,
+        init_from_pretrained_text: bool = True,
     ):
         super().__init__()
 
@@ -84,6 +95,71 @@ class HFQFormerAdapter(nn.Module):
         )
         self.qformer = InstructBlipQFormerModel(config)
         self.vocab_size = config.vocab_size
+
+        if init_from_pretrained_text:
+            self._init_text_branch_from_pretrained_bert(qformer_text_model_name)
+
+    def _init_text_branch_from_pretrained_bert(self, bert_model_name: str) -> int:
+        """Copy embeddings, self-attention, and FFN weights from a pretrained
+        BERT into the Q-Former (BLIP-2 / InstructBLIP convention).
+
+        Cross-attention layers keep their random init since BERT has no
+        cross-attention. The Q-Former names self-attention modules
+        ``encoder.layer.i.attention.attention.*`` while BERT uses
+        ``encoder.layer.i.attention.self.*``; we remap accordingly. When the
+        Q-Former has fewer layers than BERT, only the first ``num_layers``
+        of BERT are copied. Tensors with mismatched shapes (e.g. when
+        ``hidden_size`` or ``num_heads`` is configured differently from
+        BERT-base) are skipped, leaving them at their random init.
+
+        Returns the number of tensors successfully transferred.
+        """
+        if BertModel is None:
+            LOGGER.warning(
+                "transformers.BertModel not available; skipping pretrained "
+                "text-branch init. Q-Former text side will start from random."
+            )
+            return 0
+
+        try:
+            bert = BertModel.from_pretrained(bert_model_name)
+        except Exception as exc:  # network / cache miss
+            LOGGER.warning(
+                "Could not load pretrained BERT '%s' for Q-Former text-branch "
+                "init (%s). Falling back to random init.",
+                bert_model_name,
+                exc,
+            )
+            return 0
+
+        bert_state = bert.state_dict()
+        target_state = self.qformer.state_dict()
+
+        loaded = 0
+        skipped_shape = 0
+        for q_key, q_tensor in target_state.items():
+            bert_key = q_key.replace(".attention.attention.", ".attention.self.")
+            if bert_key not in bert_state:
+                continue
+            bert_tensor = bert_state[bert_key]
+            if bert_tensor.shape != q_tensor.shape:
+                skipped_shape += 1
+                continue
+            target_state[q_key] = bert_tensor.clone()
+            loaded += 1
+
+        self.qformer.load_state_dict(target_state, strict=True)
+        del bert
+
+        LOGGER.info(
+            "Initialized Q-Former text branch from %s: %d tensors loaded, "
+            "%d shape-mismatch skipped, %d Q-Former tensors total.",
+            bert_model_name,
+            loaded,
+            skipped_shape,
+            len(target_state),
+        )
+        return loaded
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """Accept both adapter-native keys and keys where the inner HF
