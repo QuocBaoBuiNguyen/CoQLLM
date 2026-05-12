@@ -322,11 +322,16 @@ class QRecLLM(Rec2Base):
         hidden = d_q * mid
 
         # per-token projection: [B,Q,d_q] -> [B,Q,H]
+        # Output LayerNorm keeps injected soft tokens at the same scale as the
+        # LLM's native input embeddings (mean_l2 ~ 1.5-2.5 for LLaMA-3B). Without
+        # it, soft tokens are several times larger than what frozen attention
+        # has ever seen, distorting downstream routing.
         self.llama_proj = nn.Sequential(
             nn.LayerNorm(d_q),
             nn.Linear(d_q, hidden),
             nn.GELU(),
             nn.Linear(hidden, H),
+            nn.LayerNorm(H),
         )
 
         if freeze_proj:
