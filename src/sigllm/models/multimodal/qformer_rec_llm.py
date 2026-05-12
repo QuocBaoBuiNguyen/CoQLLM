@@ -103,7 +103,6 @@ class QRecLLM(Rec2Base):
         qformer_text_model_name="bert-base-uncased",
         max_instruction_length=48,
         lora_config=None,
-        proj_mid=5,
         freeze_lora=False,
         freeze_proj=False
     ):
@@ -136,7 +135,7 @@ class QRecLLM(Rec2Base):
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
         )
-        self._init_projection(proj_mid, proj_token_num, freeze_proj)
+        self._init_projection(proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
 
     def _init_rec_model(self, rec_model, rec_config, pretrained_rec, freeze_rec):
@@ -280,25 +279,25 @@ class QRecLLM(Rec2Base):
         log_step("Loading QFormer Done")
         return self.qformer
 
-    def _init_projection(self, proj_mid, proj_token_num, freeze_proj):
+    def _init_projection(self, proj_token_num, freeze_proj):
         """
         Stage 2 projection: map Q-Former output tokens -> LLM hidden tokens.
         Input  : qformer_out [B, Q, d_q]
         Output : llm_tokens  [B, Q, H]
+
+        Matches InstructBLIP: a single ``nn.Linear`` from Q-Former hidden size
+        to LLM hidden size, applied per token.
         """
         log_step("Loading Projection (QFormer -> LLM)")
 
         if self.qformer is None:
             raise ValueError("qformer is None. Please init/load Q-Former before init projection.")
-        if not hasattr(self.qformer, "proj_cf") or not isinstance(self.qformer.proj_cf, nn.Linear):
-            raise ValueError("qformer.proj_cf (nn.Linear) is required to infer d_q.")
         if not hasattr(self.qformer, "q"):
             raise ValueError("qformer.q (learned query tokens) is required to infer num_queries.")
         if self.llama_model is None:
             raise ValueError("llama_model is None. Please init LLM backbone before init projection.")
 
         d_q = self.qformer.output_dim
-        # Q = int(self.qformer.q.shape[0]) // Qformer self-implemented 
         Q = int(self.qformer.q.shape[-2])
         H = int(self.llama_model.config.hidden_size)
 
@@ -309,28 +308,7 @@ class QRecLLM(Rec2Base):
                     f"proj_token_num({proj_token_num}) != qformer.num_queries({Q}). "
                     f"Using Q={Q} to keep injection consistent.")
 
-        if d_q == H:
-            self.llama_proj = nn.Identity()
-            log_step("Projection removed", f"QFormer output already matches LLaMA hidden size H={H}")
-            log_step("Loading Projection Done",
-                    f"d_q={d_q}, H={H}, Q={self.proj_token_num}, identity=True")
-            return
-
-        mid = int(proj_mid) if proj_mid is not None else 1
-        hidden = d_q * mid
-
-        # per-token projection: [B,Q,d_q] -> [B,Q,H]
-        # Output LayerNorm keeps injected soft tokens at the same scale as the
-        # LLM's native input embeddings (mean_l2 ~ 1.5-2.5 for LLaMA-3B). Without
-        # it, soft tokens are several times larger than what frozen attention
-        # has ever seen, distorting downstream routing.
-        self.llama_proj = nn.Sequential(
-            nn.LayerNorm(d_q),
-            nn.Linear(d_q, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, H),
-            nn.LayerNorm(H),
-        )
+        self.llama_proj = nn.Linear(d_q, H)
 
         if freeze_proj:
             for p in self.llama_proj.parameters():
@@ -340,7 +318,7 @@ class QRecLLM(Rec2Base):
             log_step("Freeze llama_proj")
 
         log_step("Loading Projection Done",
-                f"d_q={d_q}, hidden={hidden}, H={H}, Q={self.proj_token_num}, mid={mid}")
+                f"d_q={d_q}, H={H}, Q={self.proj_token_num}")
 
     def _log_trainable_module_stats(self):
         if self._has_logged_trainable_stats:
@@ -826,7 +804,6 @@ class QRecLLM(Rec2Base):
         lora_config = cfg.get("lora_config")
         llama_model = cfg.get("llama_model")
         proj_token_num = cfg.get("proj_token_num")
-        proj_mid = cfg.get("proj_mid_times")
         freeze_proj = cfg.get("freeze_proj")
         freeze_lora = cfg.get("freeze_lora")
         prompt_path = cfg.get("prompt_path", "")
@@ -862,7 +839,6 @@ class QRecLLM(Rec2Base):
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
             lora_config=lora_config,
-            proj_mid=proj_mid,
             freeze_lora=freeze_lora,
             freeze_proj=freeze_proj
         )

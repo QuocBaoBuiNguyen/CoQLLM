@@ -14,8 +14,7 @@ model:
   ans_type: "v2"
   
   proj_token_num: ${model.qformer_config.num_queries}
-  proj_mid_times: 1
-  
+
   rec_model: "MF"
   user_num: -100
   item_num: -100
