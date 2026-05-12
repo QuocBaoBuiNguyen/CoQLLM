@@ -88,6 +88,7 @@ class QRecLLM(Rec2Base):
         rec_config=None,
         pretrained_rec=None,
         pretrained_qformer=None,
+        pretrained_llama_proj=None,
         freeze_rec=True,
         llama_model="",
         prompt_path="",
@@ -135,7 +136,7 @@ class QRecLLM(Rec2Base):
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
         )
-        self._init_projection(proj_token_num, freeze_proj)
+        self._init_projection(proj_token_num, freeze_proj, pretrained_llama_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
 
     def _init_rec_model(self, rec_model, rec_config, pretrained_rec, freeze_rec):
@@ -279,14 +280,16 @@ class QRecLLM(Rec2Base):
         log_step("Loading QFormer Done")
         return self.qformer
 
-    def _init_projection(self, proj_token_num, freeze_proj):
+    def _init_projection(self, proj_token_num, freeze_proj, pretrained_llama_proj=None):
         """
         Stage 2 projection: map Q-Former output tokens -> LLM hidden tokens.
         Input  : qformer_out [B, Q, d_q]
         Output : llm_tokens  [B, Q, H]
 
         Matches InstructBLIP: a single ``nn.Linear`` from Q-Former hidden size
-        to LLM hidden size, applied per token.
+        to LLM hidden size, applied per token. If ``pretrained_llama_proj``
+        points to a state dict (e.g. from Phase 2 generative pretraining), it
+        is loaded before any freezing.
         """
         log_step("Loading Projection (QFormer -> LLM)")
 
@@ -309,6 +312,11 @@ class QRecLLM(Rec2Base):
                     f"Using Q={Q} to keep injection consistent.")
 
         self.llama_proj = nn.Linear(d_q, H)
+
+        if pretrained_llama_proj and pretrained_llama_proj != "not_have" and os.path.exists(pretrained_llama_proj):
+            state_dict = torch.load(pretrained_llama_proj, map_location="cpu")
+            self.llama_proj.load_state_dict(state_dict, strict=True)
+            log_step("Loaded Phase 2 projection", pretrained_llama_proj)
 
         if freeze_proj:
             for p in self.llama_proj.parameters():
@@ -818,12 +826,14 @@ class QRecLLM(Rec2Base):
         pretrained_qformer = qformer_config.get("qformer_ckpt")
         qformer_text_model_name = qformer_config.get("qformer_text_model_name", "bert-base-uncased")
         max_instruction_length = qformer_config.get("max_instruction_length", 48)
+        pretrained_llama_proj = qformer_config.get("llama_proj_ckpt")
 
         model = cls(
             rec_model=rec_model,
             rec_config=rec_config,
             pretrained_rec=rec_config['pretrained_path'],
             pretrained_qformer=pretrained_qformer,
+            pretrained_llama_proj=pretrained_llama_proj,
             freeze_rec=freeze_rec,
             llama_model=llama_model,
             prompt_path=prompt_path,
