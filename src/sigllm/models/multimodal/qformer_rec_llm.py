@@ -6,7 +6,6 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from transformers import LlamaTokenizer, LlamaForCausalLM
-from peft import LoraConfig, get_peft_model
 
 import os
 
@@ -103,14 +102,11 @@ class QRecLLM(Rec2Base):
         qformer_output_dim=None,
         qformer_text_model_name="bert-base-uncased",
         max_instruction_length=48,
-        lora_config=None,
-        freeze_lora=False,
         freeze_proj=False
     ):
         super().__init__()
 
         self.proj_token_num = proj_token_num
-        self.use_lora = False
         self._has_logged_trainable_stats = False
         self._flow_log_steps = 0
         self._max_flow_log_steps = 3
@@ -123,7 +119,6 @@ class QRecLLM(Rec2Base):
         # Initialize components
         self._init_rec_model(rec_model, rec_config, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model)
-        self._init_lora(lora_config, freeze_lora)
         self._init_qformer(
             d_cf=rec_config.embedding_size,
             d_model=qformer_d_model,
@@ -172,45 +167,6 @@ class QRecLLM(Rec2Base):
         for name, param in self.llama_model.named_parameters():
             param.requires_grad = False
         log_step("Loading LLAMA Done")
-
-    def _init_lora(self, lora_config, freeze_lora):
-        self.use_lora = False
-        if lora_config is None or not lora_config.use_lora:
-            return
-
-        log_step("Setting LoRA")
-        target_modules = list(lora_config.target_modules)
-        peft_config = LoraConfig(
-            r=int(lora_config.r),
-            lora_alpha=int(lora_config.alpha),
-            target_modules=target_modules,
-            lora_dropout=float(lora_config.dropout),
-            bias="none",
-            task_type="CAUSAL_LM",
-        )
-        self.llama_model = get_peft_model(self.llama_model, peft_config)
-        self.use_lora = True
-
-        # LoRA adapters inherit the base LLM's fp16 dtype, but AMP GradScaler
-        # refuses to unscale fp16 gradients. Cast trainable params to fp32 so
-        # AMP works; the frozen base LLM stays in fp16.
-        for _, param in self.llama_model.named_parameters():
-            if param.requires_grad:
-                param.data = param.data.float()
-
-        log_step(
-            "Setting LoRA Done",
-            f"r={peft_config.r}, alpha={peft_config.lora_alpha}, "
-            f"dropout={peft_config.lora_dropout}, target_modules={target_modules}",
-        )
-
-        if freeze_lora:
-            for _, param in self.llama_model.named_parameters():
-                param.requires_grad = False
-            log_step("Freeze LoRA adapters", "all LLM params requires_grad=False")
-        else:
-            trainable = count_trainable_parameters(self.llama_model)
-            log_step("LoRA trainable params", f"{trainable:,}")
 
     def _init_qformer(
         self,
@@ -393,9 +349,6 @@ class QRecLLM(Rec2Base):
         self.run_mode_ = mode
 
     def to_be_trained(self):
-        if self.use_lora:
-            return True
-
         # TEMP_DISABLED_USER_CF: old trainable placeholders included "<UserID>".
         # id_terms = ["<UserID>", "<ItemIDList>", "<TargetItemID>", "<DCNFeature>"]
         id_terms = ["<ItemIDList>", "<TargetItemID>", "<DCNFeature>"]
@@ -809,11 +762,9 @@ class QRecLLM(Rec2Base):
         freeze_rec = cfg.get("freeze_rec",True)
         rec_config = cfg.get("rec_config")
         qformer_config = cfg.get("qformer_config") or {}
-        lora_config = cfg.get("lora_config")
         llama_model = cfg.get("llama_model")
         proj_token_num = cfg.get("proj_token_num")
         freeze_proj = cfg.get("freeze_proj")
-        freeze_lora = cfg.get("freeze_lora")
         prompt_path = cfg.get("prompt_path", "")
         prompt_template = cfg.get("prompt_template", "")
         max_txt_len = cfg.get("max_txt_len", 1024)
@@ -848,8 +799,6 @@ class QRecLLM(Rec2Base):
             qformer_output_dim=qformer_output_dim,
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
-            lora_config=lora_config,
-            freeze_lora=freeze_lora,
             freeze_proj=freeze_proj
         )
 

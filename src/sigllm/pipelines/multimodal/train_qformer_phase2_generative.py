@@ -3,8 +3,8 @@
 Loads the Q-Former weights from Phase 1, attaches a fresh ``nn.Linear``
 projection into LLaMA's hidden size, and trains Q-Former + projection with
 next-token language modeling on item-text captions while keeping the LLM
-fully frozen (no LoRA). This produces a checkpoint usable as the starting
-point for Stage 3 (instruction tuning with LoRA in ``QRecLLM``).
+fully frozen. This produces a checkpoint usable as the starting point for
+Stage 3 (instruction tuning with frozen LLM in ``QRecLLM``).
 
 Prompt layout per sample:
 
