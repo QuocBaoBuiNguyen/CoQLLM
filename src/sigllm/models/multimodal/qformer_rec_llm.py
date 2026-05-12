@@ -89,14 +89,12 @@ class QRecLLM(Rec2Base):
         pretrained_rec=None,
         pretrained_qformer=None,
         freeze_rec=True,
-        rec_precision='fp16',
         llama_model="",
         prompt_path="",
         prompt_template="",
         max_txt_len=1024,
         end_sym='\n',
         proj_token_num=1, # the number of tokens that the user/item embedding projected to
-        proj_drop=0,
         num_queries=8,
         num_heads=8,
         num_layers=2,
@@ -121,9 +119,9 @@ class QRecLLM(Rec2Base):
         log_step("Running MiniGPT4Rec_v2 initialization")
 
         self.rec_model_type = rec_model
-        
+
         # Initialize components
-        self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
+        self._init_rec_model(rec_model, rec_config, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model)
         self._init_lora(lora_config, freeze_lora)
         self._init_qformer(
@@ -141,9 +139,9 @@ class QRecLLM(Rec2Base):
         self._init_projection(proj_mid, proj_token_num, freeze_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
 
-    def _init_rec_model(self, rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec):
+    def _init_rec_model(self, rec_model, rec_config, pretrained_rec, freeze_rec):
         log_step("Loading Rec_model")
-        self.rec_encoder = self.init_rec_encoder(rec_model, rec_config, rec_precision)
+        self.rec_encoder = self.init_rec_encoder(rec_model, rec_config)
         
         if self.rec_encoder is not None and pretrained_rec != "not_have":
             self.rec_encoder.load_state_dict(torch.load(pretrained_rec, map_location="cpu"))
@@ -392,11 +390,8 @@ class QRecLLM(Rec2Base):
             self.prompt_list = [prompt_template.format(p) for p in filted_prompts]
             log_step(f"Load {len(self.prompt_list)} training prompts")
             log_step(f"Prompt List: \n{self.prompt_list}")
-            self.has_pri_decode = False
-            self.prompt_list_p = None
         else:
             self.prompt_list = []
-            self.prompt_list_p = None
 
     def _sample_prompt(self):
         return random.choices(
@@ -825,15 +820,12 @@ class QRecLLM(Rec2Base):
     @classmethod
     def from_config(cls, cfg):
         rec_model = cfg.get('rec_model',"MF")
-        embedding_size = cfg.get("rec_emb_size")
         freeze_rec = cfg.get("freeze_rec",True)
-        rec_precision = cfg.get("rec_precision", 'fp16')
         rec_config = cfg.get("rec_config")
         qformer_config = cfg.get("qformer_config") or {}
         lora_config = cfg.get("lora_config")
         llama_model = cfg.get("llama_model")
         proj_token_num = cfg.get("proj_token_num")
-        proj_drop = cfg.get("proj_drop")
         proj_mid = cfg.get("proj_mid_times")
         freeze_proj = cfg.get("freeze_proj")
         freeze_lora = cfg.get("freeze_lora")
@@ -856,14 +848,12 @@ class QRecLLM(Rec2Base):
             pretrained_rec=rec_config['pretrained_path'],
             pretrained_qformer=pretrained_qformer,
             freeze_rec=freeze_rec,
-            rec_precision=rec_precision,
             llama_model=llama_model,
             prompt_path=prompt_path,
             prompt_template=prompt_template,
             max_txt_len=max_txt_len,
             end_sym=end_sym,
             proj_token_num=proj_token_num,
-            proj_drop=proj_drop,
             num_queries=num_queries,
             num_heads=num_heads,
             num_layers=num_layers,
