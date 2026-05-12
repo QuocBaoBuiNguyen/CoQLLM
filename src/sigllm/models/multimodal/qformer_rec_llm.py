@@ -6,13 +6,13 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from transformers import LlamaTokenizer, LlamaForCausalLM
+from peft import LoraConfig, get_peft_model
 
 import os
 
 from sigllm.common.logging_utils import NotebookLogger
 from sigllm.common.registry import registry
 from sigllm.models.multimodal.base.rec_base_model import Rec2Base
-# from sigllm.models.q_former.q_former import QFormer
 from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
 
 LOGGER = NotebookLogger.rich_logger("sigllm.rec_base_model")
@@ -62,6 +62,26 @@ class QRecLLM(Rec2Base):
     # PLACEHOLDERS_FOR_EMBED = ["<UserID>", "<ItemIDList>", "<TargetItemID>"]
     PLACEHOLDERS_FOR_EMBED = ["<ItemIDList>", "<TargetItemID>"]
 
+    # Item-text instructions for the Q-Former. Must match the distribution
+    # the Q-Former was trained on in stage 1 (see
+    # QFormerAlignmentBuilder.TEMPL_ITEM_TEXT). The verbose stage 2 prompt
+    # MUST NOT be passed here — it gets truncated to max_instruction_length
+    # tokens and would carry no per-item signal.
+    QFORMER_ITEM_INSTRUCTIONS = [
+        "Represent this movie for recommendation using its title and genres.",
+        "Align this movie metadata with its collaborative filtering representation.",
+        "Given the movie metadata, extract recommendation-relevant item features.",
+        "Use the title and genres to describe this movie in the item embedding space.",
+        "Map this movie's textual attributes to its collaborative recommendation signal.",
+        "Identify the movie preferences implied by its title and genre metadata.",
+        "Create a language-aligned representation of this movie for recommendation.",
+        "Summarize this movie as an item a recommender system can compare.",
+        "Based on the title and genres, represent what kind of users may like this movie.",
+        "Encode the semantic information of this movie for item-language alignment.",
+        "Use a few metadata cues to align this movie with behavioral item signals.",
+        "Produce a recommendation-aware representation from this movie description.",
+    ]
+
     def __init__(
         self,
         rec_model="MF",
@@ -105,6 +125,7 @@ class QRecLLM(Rec2Base):
         # Initialize components
         self._init_rec_model(rec_model, rec_config, rec_precision, pretrained_rec, freeze_rec)
         self._init_llm_model(llama_model)
+        self._init_lora(lora_config, freeze_lora)
         self._init_qformer(
             d_cf=rec_config.embedding_size,
             d_model=qformer_d_model,
@@ -154,26 +175,36 @@ class QRecLLM(Rec2Base):
             param.requires_grad = False
         log_step("Loading LLAMA Done")
 
-    # def _init_lora(self, lora_config, freeze_lora):
-    #     self.use_lora = False
-    #     if lora_config is not None and lora_config.use_lora:
-    #         log_step("Setting Lora")
-    #         self.use_lora = True
-    #         peft_config = LoraConfig(
-    #             r=lora_config.r,
-    #             lora_alpha=lora_config.alpha,
-    #             target_modules=lora_config.target_modules,
-    #             lora_dropout=lora_config.dropout,
-    #             bias="none",
-    #             task_type="CAUSAL_LM"
-    #         ) 
-    #         self.llama_model_lora = get_peft_model(self.llama_model, peft_config)
-    #         log_step("Setting Lora Done")
-        
-    #     if freeze_lora and hasattr(self, 'llama_model_lora'):
-    #         log_step("Freeze Lora...")
-    #         for name, param in self.llama_model_lora.named_parameters():
-    #             param.requires_grad = False
+    def _init_lora(self, lora_config, freeze_lora):
+        self.use_lora = False
+        if lora_config is None or not lora_config.use_lora:
+            return
+
+        log_step("Setting LoRA")
+        target_modules = list(lora_config.target_modules)
+        peft_config = LoraConfig(
+            r=int(lora_config.r),
+            lora_alpha=int(lora_config.alpha),
+            target_modules=target_modules,
+            lora_dropout=float(lora_config.dropout),
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        self.llama_model = get_peft_model(self.llama_model, peft_config)
+        self.use_lora = True
+        log_step(
+            "Setting LoRA Done",
+            f"r={peft_config.r}, alpha={peft_config.lora_alpha}, "
+            f"dropout={peft_config.lora_dropout}, target_modules={target_modules}",
+        )
+
+        if freeze_lora:
+            for _, param in self.llama_model.named_parameters():
+                param.requires_grad = False
+            log_step("Freeze LoRA adapters", "all LLM params requires_grad=False")
+        else:
+            trainable = count_trainable_parameters(self.llama_model)
+            log_step("LoRA trainable params", f"{trainable:,}")
 
     def _init_qformer(
         self,
@@ -443,7 +474,7 @@ class QRecLLM(Rec2Base):
         if instruction_list is None:
             instruction_list = batch_data.get(
                 "instruction",
-                ["Use the interaction history to predict whether the user will like the target movie."] * B,
+                self._build_qformer_instructions(B),
             )
         if isinstance(instruction_list, str):
             ins_list = [instruction_list] * B
@@ -655,11 +686,10 @@ class QRecLLM(Rec2Base):
 
     def execute_llm_forward(self, embeds, atts, targets):
         with self.maybe_autocast():
-            model = self.llama_model_lora if self.use_lora else self.llama_model
-            return model(
+            return self.llama_model(
                 inputs_embeds=embeds,
                 attention_mask=atts,
-                return_dict=True
+                return_dict=True,
             )
 
     def calculate_recommendation_loss(self, outputs, label_tokens, batch_data, ans_map):
@@ -710,10 +740,24 @@ class QRecLLM(Rec2Base):
 
         return label_embeds, label_tokens, ans_map
 
+    def _build_qformer_instructions(self, batch_size: int) -> list:
+        """Build short item-text instructions for the Q-Former.
+
+        Matches the distribution the Q-Former was trained on in stage 1: a
+        fresh sample per row during training, a deterministic fixed string
+        during eval/inference so the same input maps to the same embedding.
+        """
+        if self.training:
+            return random.choices(self.QFORMER_ITEM_INSTRUCTIONS, k=batch_size)
+        return [self.QFORMER_ITEM_INSTRUCTIONS[0]] * batch_size
+
     def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
         feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
         batch_size = batch_data["UserID"].shape[0]
-        instruction_list = [prompt_template] * batch_size if prompt_template else None
+        # Do NOT pass the verbose stage 2 prompt as the Q-Former instruction;
+        # it would be truncated to max_instruction_length and identical across
+        # every row. Use short item-text instructions matching stage 1.
+        instruction_list = self._build_qformer_instructions(batch_size)
         rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(
             batch_data,
             feature_order=feature_order,

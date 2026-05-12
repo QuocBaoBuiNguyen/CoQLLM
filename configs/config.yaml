@@ -22,10 +22,10 @@ model:
   item_num: -100
 
   lora_config:
-    use_lora: False
+    use_lora: True
     r: 8
     alpha: 16
-    target_modules: ["q_proj", "v_proj"]
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
     dropout: 0.05
 
   qformer_config:
