@@ -256,7 +256,12 @@ class QRecLLM(Rec2Base):
                     f"proj_token_num({proj_token_num}) != qformer.num_queries({Q}). "
                     f"Using Q={Q} to keep injection consistent.")
 
-        self.llama_proj = nn.Linear(d_q, H)
+        self.llama_proj = nn.Sequential(
+            nn.Linear(d_q, H),
+            nn.LayerNorm(H),
+        )
+        nn.init.normal_(self.llama_proj[0].weight, std=0.02)
+        nn.init.zeros_(self.llama_proj[0].bias)
 
         if pretrained_llama_proj and pretrained_llama_proj != "not_have" and os.path.exists(pretrained_llama_proj):
             state_dict = torch.load(pretrained_llama_proj, map_location="cpu")
