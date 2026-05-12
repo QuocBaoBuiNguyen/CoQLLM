@@ -192,6 +192,14 @@ class QRecLLM(Rec2Base):
         )
         self.llama_model = get_peft_model(self.llama_model, peft_config)
         self.use_lora = True
+
+        # LoRA adapters inherit the base LLM's fp16 dtype, but AMP GradScaler
+        # refuses to unscale fp16 gradients. Cast trainable params to fp32 so
+        # AMP works; the frozen base LLM stays in fp16.
+        for _, param in self.llama_model.named_parameters():
+            if param.requires_grad:
+                param.data = param.data.float()
+
         log_step(
             "Setting LoRA Done",
             f"r={peft_config.r}, alpha={peft_config.lora_alpha}, "
