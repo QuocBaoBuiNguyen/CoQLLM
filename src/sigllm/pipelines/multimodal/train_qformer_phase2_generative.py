@@ -1,10 +1,13 @@
 """Phase 2 — Generative pretraining of Q-Former + projection (BLIP-2 style).
 
-Loads the Q-Former weights from Phase 1, attaches a fresh ``nn.Linear``
+Loads the Q-Former weights from Stage 1, attaches a fresh ``nn.Linear``
 projection into LLaMA's hidden size, and trains Q-Former + projection with
 next-token language modeling on item-text captions while keeping the LLM
-fully frozen. This produces a checkpoint usable as the starting point for
-Stage 3 (instruction tuning with frozen LLM in ``QRecLLM``).
+fully frozen. The Q-Former runs uni-modal here (queries cross-attend to the
+CF vector only, no text input on the Q-Former text branch) — instruction-
+awareness is reserved for Stage 3, matching BLIP-2's Phase 2 design. This
+produces a checkpoint usable as the starting point for Stage 3 (instruction
+tuning with frozen LLM in ``QRecLLM``).
 
 Prompt layout per sample:
 
@@ -206,12 +209,15 @@ def _move_batch_to_device(batch, device):
 def forward_phase2(batch, mf, qformer, llama_proj, tokenizer, llm, max_caption_length: int):
     item_ids = batch["i_left"]
     captions = batch["text"]
-    instructions = batch["instruction"]
 
     with torch.no_grad():
         item_cf = mf.item_encoder(item_ids)
 
-    query_tokens = qformer(item_cf, instructions)
+    # BLIP-2-style generative pretraining: queries cross-attend to the CF
+    # vector only, no text input to the Q-Former. Instruction-awareness is
+    # deferred to Stage 3 (instruction tuning).
+    query_tokens = qformer.encode_cf(item_cf)
+    query_tokens = qformer.out_proj(query_tokens)
     soft_tokens = llama_proj(query_tokens)
 
     llm_dtype = next(llm.parameters()).dtype
