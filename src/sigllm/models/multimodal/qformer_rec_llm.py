@@ -262,6 +262,8 @@ class QRecLLM(Rec2Base):
         )
         nn.init.normal_(self.llama_proj[0].weight, std=0.02)
         nn.init.zeros_(self.llama_proj[0].bias)
+        nn.init.constant_(self.llama_proj[1].weight, H ** -0.5)
+        nn.init.zeros_(self.llama_proj[1].bias)
 
         if pretrained_llama_proj and pretrained_llama_proj != "not_have" and os.path.exists(pretrained_llama_proj):
             state_dict = torch.load(pretrained_llama_proj, map_location="cpu")

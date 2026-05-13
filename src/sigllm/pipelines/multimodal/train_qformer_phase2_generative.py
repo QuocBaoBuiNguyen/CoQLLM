@@ -147,10 +147,11 @@ def _init_llm(model_path, device):
 def _build_projection(d_q: int, hidden_size: int, device) -> nn.Module:
     """Linear + LayerNorm projection.
 
-    The LayerNorm tail keeps soft-token scale close to the LLM's native input
-    embedding scale (mean_l2 ~1-2 for Vicuna-7B). Without it, raw Linear
-    output reaches mean_l2 ~18 and drowns the text portion of the prompt
-    under the frozen attention.
+    LayerNorm.weight is initialised at ``1/sqrt(hidden_size)`` so the output
+    has ``mean_l2 ~ 1`` from step 0, matching Vicuna's native input
+    embedding scale. Default LayerNorm init (weight=1) gives mean_l2 ~
+    sqrt(H) ~ 64, which drowns the text portion of the prompt under the
+    frozen attention.
     """
     proj = nn.Sequential(
         nn.Linear(d_q, hidden_size),
@@ -158,6 +159,8 @@ def _build_projection(d_q: int, hidden_size: int, device) -> nn.Module:
     ).to(device).float()
     nn.init.normal_(proj[0].weight, std=0.02)
     nn.init.zeros_(proj[0].bias)
+    nn.init.constant_(proj[1].weight, hidden_size ** -0.5)
+    nn.init.zeros_(proj[1].bias)
     return proj
 
 
