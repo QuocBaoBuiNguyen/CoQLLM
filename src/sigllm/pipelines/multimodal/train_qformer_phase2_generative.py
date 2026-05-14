@@ -27,12 +27,13 @@ import omegaconf
 import torch
 import torch.nn as nn
 from torch.optim import Adam
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import Subset
 from transformers import LlamaForCausalLM, LlamaTokenizer
 
 from sigllm.common import EarlyStopping, NotebookLogger
 from sigllm.common.config import Config
 from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
+from sigllm.datasets.qformer.qformer_loader import build_qformer_loader
 from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 
@@ -57,33 +58,11 @@ def disabled_train(self, mode=True):
     return self
 
 
-def collate(batch):
-    keys = batch[0].keys()
-    out = {}
-    for k in keys:
-        if isinstance(batch[0][k], torch.Tensor):
-            out[k] = torch.stack([b[k] for b in batch], dim=0)
-        else:
-            out[k] = [b[k] for b in batch]
-    return out
-
-
 def _filter_item_text(dataset: QFormerAlignmentDataset) -> Subset:
     indices = [i for i, s in enumerate(dataset.samples) if s["sample_type"] == "item_text"]
     if not indices:
         raise ValueError("No item_text samples found in dataset; cannot run generative pretraining.")
     return Subset(dataset, indices)
-
-
-def _init_dataset(cfg, filename: str, shuffle: bool):
-    dataset = _filter_item_text(QFormerAlignmentDataset(filename=filename))
-    return DataLoader(
-        dataset,
-        batch_size=int(cfg.batch_size),
-        shuffle=shuffle,
-        collate_fn=collate,
-        num_workers=int(cfg.num_workers),
-    )
 
 
 def _init_rec_model(cfg, device):
@@ -279,11 +258,17 @@ def train_qformer_phase2_generative(cfg):
     set_seed(int(cfg.seed))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader = _init_dataset(
-        cfg, filename=os.path.join(cfg.data_dir, "train_qformer_ood2.pkl"), shuffle=True
+    train_loader = build_qformer_loader(
+        cfg,
+        filename=os.path.join(cfg.data_dir, "train_qformer_ood2.pkl"),
+        shuffle=True,
+        filter_fn=_filter_item_text,
     )
-    valid_loader = _init_dataset(
-        cfg, filename=os.path.join(cfg.data_dir, "valid_qformer_ood2.pkl"), shuffle=False
+    valid_loader = build_qformer_loader(
+        cfg,
+        filename=os.path.join(cfg.data_dir, "valid_qformer_ood2.pkl"),
+        shuffle=False,
+        filter_fn=_filter_item_text,
     )
 
     mf = _init_rec_model(cfg, device)

@@ -1,7 +1,6 @@
 import argparse
 import random
 import torch
-from torch.utils.data import DataLoader
 from torch.optim import Adam
 import omegaconf
 import os
@@ -11,7 +10,7 @@ from typing import Optional
 from sigllm.common import NotebookLogger, EarlyStopping
 from sigllm.common.config import Config
 from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
-from sigllm.datasets.qformer.qformer_alignment_dataset import QFormerAlignmentDataset
+from sigllm.datasets.qformer.qformer_loader import build_qformer_loaders
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
 from sigllm.models.projection.qformer_alignment_model import QRecInstructAlignmentModel
@@ -37,17 +36,6 @@ def disabled_train(self, mode=True):
     """Overwrite model.train with this function to make sure train/eval mode
     does not change anymore."""
     return self
-
-
-def collate(batch):
-    keys = batch[0].keys()
-    out = {}
-    for k in keys:
-        if isinstance(batch[0][k], torch.Tensor):
-            out[k] = torch.stack([b[k] for b in batch], dim=0)
-        else:
-            out[k] = [b[k] for b in batch]
-    return out
 
 
 def _init_rec_model(cfg, device):
@@ -77,21 +65,6 @@ def _init_rec_model(cfg, device):
         print("Freeze rec encoder completed")
 
     return mf
-
-
-def _init_dataset(cfg, filename: str, shuffle: bool = True):
-    """
-    Initializes the dataset and dataloader.
-    """
-    dataset = QFormerAlignmentDataset(filename=filename)
-    loader = DataLoader(
-        dataset, 
-        batch_size=cfg.batch_size, 
-        shuffle=shuffle, 
-        collate_fn=collate, 
-        num_workers=cfg.num_workers
-    )
-    return loader
 
 
 def _init_qformer(cfg, d_model, device):
@@ -314,9 +287,7 @@ def train_qformer_stage1_representation(cfg):
     set_seed(int(cfg.seed))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "train_qformer_ood2.pkl"), shuffle=True)
-    val_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "valid_qformer_ood2.pkl"), shuffle=False)
-    test_loader = _init_dataset(cfg, filename=os.path.join(cfg.data_dir, "test_qformer_ood2.pkl"), shuffle=False)
+    train_loader, val_loader, test_loader = build_qformer_loaders(cfg, data_dir=cfg.data_dir)
     
     mf = _init_rec_model(cfg, device)
     qformer_d_model = int(cfg.get("qformer_d_model", 768))
