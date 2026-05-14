@@ -9,7 +9,6 @@ from typing import Optional
 
 from sigllm.common import NotebookLogger, EarlyStopping
 from sigllm.common.config import Config
-from sigllm.datasets.qformer.qformer_alignment_builder import QFormerAlignmentBuilder
 from sigllm.datasets.qformer.qformer_loader import build_qformer_loaders
 from sigllm.models.rec.matrix_factorization import MatrixFactorization
 from sigllm.models.q_former.hf_qformer_adapter import HFQFormerAdapter
@@ -503,38 +502,6 @@ def main():
 
     first_dataset_key = list(cfg.datasets_cfg.keys())[0]
     stage1_cfg.data_dir = cfg.datasets_cfg[first_dataset_key].path
-    item_pair_window = int(stage1_cfg.get("item_pair_window", 2))
-    max_item_item_pairs = stage1_cfg.get("max_item_item_pairs", None)
-    max_user_item_pairs = stage1_cfg.get("max_user_item_pairs", None)
-    include_user_item = bool(stage1_cfg.get("include_user_item", False))
-
-    QFormerAlignmentBuilder.build_qformer_alignment_samples(        
-        input_pkl_path=os.path.join(stage1_cfg.data_dir, "train_ood2.pkl"),
-        output_path=os.path.join(stage1_cfg.data_dir, "train_qformer_ood2.pkl"),
-        seed=stage1_cfg.seed,
-        item_pair_window=item_pair_window,
-        max_item_item_pairs=max_item_item_pairs,
-        max_user_item_pairs=max_user_item_pairs,
-        include_user_item=include_user_item,
-    )
-    QFormerAlignmentBuilder.build_qformer_alignment_samples(        
-        input_pkl_path=os.path.join(stage1_cfg.data_dir, "valid_ood2.pkl"),
-        output_path=os.path.join(stage1_cfg.data_dir, "valid_qformer_ood2.pkl"),
-        seed=stage1_cfg.seed,
-        item_pair_window=item_pair_window,
-        max_item_item_pairs=max_item_item_pairs,
-        max_user_item_pairs=max_user_item_pairs,
-        include_user_item=include_user_item,
-    )
-    QFormerAlignmentBuilder.build_qformer_alignment_samples(        
-        input_pkl_path=os.path.join(stage1_cfg.data_dir, "test_ood2.pkl"),
-        output_path=os.path.join(stage1_cfg.data_dir, "test_qformer_ood2.pkl"),
-        seed=stage1_cfg.seed,
-        item_pair_window=item_pair_window,
-        max_item_item_pairs=max_item_item_pairs,
-        max_user_item_pairs=max_user_item_pairs,
-        include_user_item=include_user_item,
-    )
 
     train_qformer_stage1_representation(stage1_cfg)
 
