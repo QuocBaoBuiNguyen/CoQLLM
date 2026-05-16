@@ -102,7 +102,8 @@ class QRecLLM(Rec2Base):
         qformer_output_dim=None,
         qformer_text_model_name="bert-base-uncased",
         max_instruction_length=48,
-        freeze_proj=False
+        freeze_proj=False,
+        ablate_soft_tokens=False,
     ):
         super().__init__()
 
@@ -113,6 +114,15 @@ class QRecLLM(Rec2Base):
         self._has_logged_prompt_injection_stats = False
         self._eval_pred_log_count = 0
         self._max_eval_pred_log_batches = 20
+
+        self.ablate_soft_tokens = bool(ablate_soft_tokens)
+        if self.ablate_soft_tokens:
+            log_step(
+                "ABLATION ACTIVE",
+                "ablate_soft_tokens=True → target_llama and interacted_llama_flat "
+                "will be zeroed before injection (Information flow log will show "
+                "target_llama mean/std=0).",
+            )
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -442,6 +452,9 @@ class QRecLLM(Rec2Base):
             # user_llama = self.llama_proj(user_q)               # [B,Q,H]
             target_llama = self.llama_proj(target_q)           # [B,Q,H]
 
+            if self.ablate_soft_tokens:
+                target_llama = torch.zeros_like(target_llama)
+
             interacted_llama_flat = None
             merged_flat = None
 
@@ -463,6 +476,8 @@ class QRecLLM(Rec2Base):
 
                 inter_q_flat = self.qformer(inter_cf_flat, inter_ins_list)                 # [B*L,Q,d_model]
                 inter_llama_flat2 = self.llama_proj(inter_q_flat)                         # [B*L,Q,H]
+                if self.ablate_soft_tokens:
+                    inter_llama_flat2 = torch.zeros_like(inter_llama_flat2)
                 inter_llama = inter_llama_flat2.reshape(B, L, Q, H)                       # [B,L,Q,H]
                 interacted_llama_flat = inter_llama.reshape(B, L * Q, H)                  # [B,L*Q,H]
 
@@ -814,6 +829,7 @@ class QRecLLM(Rec2Base):
         qformer_text_model_name = qformer_config.get("qformer_text_model_name", "bert-base-uncased")
         max_instruction_length = qformer_config.get("max_instruction_length", 48)
         pretrained_llama_proj = qformer_config.get("llama_proj_ckpt")
+        ablate_soft_tokens = cfg.get("ablate_soft_tokens", False)
 
         model = cls(
             rec_model=rec_model,
@@ -835,7 +851,8 @@ class QRecLLM(Rec2Base):
             qformer_output_dim=qformer_output_dim,
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
-            freeze_proj=freeze_proj
+            freeze_proj=freeze_proj,
+            ablate_soft_tokens=ablate_soft_tokens,
         )
 
         ckpt_path = cfg.get("ckpt", "")

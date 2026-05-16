@@ -12,6 +12,14 @@ model:
   freeze_rec: True
   freeze_proj: False
 
+  # Stage 3 ablation switch. When True, target_llama and interacted_llama_flat
+  # are zeroed right after llama_proj, so every soft-token slot in the prompt
+  # carries a zero vector instead of the projected Q-Former output. Use this
+  # to measure the marginal contribution of soft tokens at inference: load a
+  # trained checkpoint, flip this to True, re-evaluate. If AUC barely drops,
+  # the Q-Former isn't contributing — the LLM is leaning on prompt text alone.
+  ablate_soft_tokens: False
+
   max_txt_len: 1024
   end_sym: "###"
   ans_type: "v2"
