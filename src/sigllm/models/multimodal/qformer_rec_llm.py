@@ -220,20 +220,20 @@ class QRecLLM(Rec2Base):
             for p in self.qformer.parameters():
                 p.requires_grad = True
             self.qformer.train()
-            log_step("Train QFormer in stage2")
+            log_step("Train QFormer in stage 3")
 
         log_step("Loading QFormer Done")
         return self.qformer
 
     def _init_projection(self, proj_token_num, freeze_proj, pretrained_llama_proj=None):
         """
-        Stage 2 projection: map Q-Former output tokens -> LLM hidden tokens.
+        Stage 3 projection: map Q-Former output tokens -> LLM hidden tokens.
         Input  : qformer_out [B, Q, d_q]
         Output : llm_tokens  [B, Q, H]
 
         Matches InstructBLIP: a single ``nn.Linear`` from Q-Former hidden size
         to LLM hidden size, applied per token. If ``pretrained_llama_proj``
-        points to a state dict (e.g. from Phase 2 generative pretraining), it
+        points to a state dict (e.g. from Stage 2 generative pretraining), it
         is loaded before any freezing.
         """
         log_step("Loading Projection (QFormer -> LLM)")
@@ -268,7 +268,7 @@ class QRecLLM(Rec2Base):
         if pretrained_llama_proj and pretrained_llama_proj != "not_have" and os.path.exists(pretrained_llama_proj):
             state_dict = torch.load(pretrained_llama_proj, map_location="cpu")
             self.llama_proj.load_state_dict(state_dict, strict=True)
-            log_step("Loaded Phase 2 projection", pretrained_llama_proj)
+            log_step("Loaded Stage 2 projection", pretrained_llama_proj)
 
         if freeze_proj:
             for p in self.llama_proj.parameters():

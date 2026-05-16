@@ -27,7 +27,7 @@ class HFQFormerAdapter(nn.Module):
     Exposes multiple forward modes used by the SigLLM training stages:
 
     - ``forward(cf_vec, text)`` — joint forward returning query hidden states
-      with ``out_proj`` applied. Used by Phase 2 / Stage 3 when ``text`` is the
+      with ``out_proj`` applied. Used by Stage 2 / Stage 3 when ``text`` is the
       InstructBLIP-style task instruction.
     - ``encode_cf(cf_vec)`` — queries only, no text branch input. Used by
       Stage 1 ITC where the CF and text streams are kept uni-modal.

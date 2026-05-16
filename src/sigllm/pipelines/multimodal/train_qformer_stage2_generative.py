@@ -1,11 +1,11 @@
-"""Phase 2 — Generative pretraining of Q-Former + projection (BLIP-2 style).
+"""Stage 2 — Generative pretraining of Q-Former + projection (BLIP-2 style).
 
 Loads the Q-Former weights from Stage 1, attaches a fresh ``nn.Linear``
 projection into LLaMA's hidden size, and trains Q-Former + projection with
 next-token language modeling on item-text captions while keeping the LLM
 fully frozen. The Q-Former runs uni-modal here (queries cross-attend to the
 CF vector only, no text input on the Q-Former text branch) — instruction-
-awareness is reserved for Stage 3, matching BLIP-2's Phase 2 design. This
+awareness is reserved for Stage 3, matching BLIP-2's stage-2 design. This
 produces a checkpoint usable as the starting point for Stage 3 (instruction
 tuning with frozen LLM in ``QRecLLM``).
 
@@ -39,7 +39,7 @@ from sigllm.models.rec.matrix_factorization import MatrixFactorization
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-LOGGER = NotebookLogger.rich_logger("sigllm.train_qformer_phase2")
+LOGGER = NotebookLogger.rich_logger("sigllm.train_qformer_stage2")
 
 
 def log_step(title: str, detail: Optional[str] = None) -> None:
@@ -198,7 +198,7 @@ def _move_batch_to_device(batch, device):
     return batch
 
 
-def forward_phase2(batch, mf, qformer, llama_proj, tokenizer, llm, max_caption_length: int):
+def forward_stage2(batch, mf, qformer, llama_proj, tokenizer, llm, max_caption_length: int):
     item_ids = batch["i_left"]
     captions = batch["text"]
 
@@ -242,7 +242,7 @@ def evaluate(loader, mf, qformer, llama_proj, tokenizer, llm, device, max_captio
     with torch.no_grad():
         for batch in loader:
             batch = _move_batch_to_device(batch, device)
-            loss = forward_phase2(
+            loss = forward_stage2(
                 batch, mf, qformer, llama_proj, tokenizer, llm, max_caption_length
             )
             total += float(loss.item())
@@ -254,7 +254,7 @@ def evaluate(loader, mf, qformer, llama_proj, tokenizer, llm, device, max_captio
     return total / steps
 
 
-def train_qformer_phase2_generative(cfg):
+def train_qformer_stage2_generative(cfg):
     set_seed(int(cfg.seed))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -299,7 +299,7 @@ def train_qformer_phase2_generative(cfg):
         min_delta=float(cfg.early_stopping_min_delta),
     )
     log_step(
-        "Phase 2 setup",
+        "Stage 2 setup",
         f"d_q={d_q}, H={hidden_size}, K={qformer.num_queries}, "
         f"train={len(train_loader.dataset)}, valid={len(valid_loader.dataset)}, "
         f"output_dir={outdir}",
@@ -316,7 +316,7 @@ def train_qformer_phase2_generative(cfg):
         for batch in train_loader:
             batch = _move_batch_to_device(batch, device)
             optimizer.zero_grad()
-            loss = forward_phase2(
+            loss = forward_stage2(
                 batch, mf, qformer, llama_proj, tokenizer, llm, max_caption_length
             )
             scaler.scale(loss).backward()
@@ -341,7 +341,7 @@ def train_qformer_phase2_generative(cfg):
             torch.save(qformer.state_dict(), qformer_out)
             torch.save(llama_proj.state_dict(), proj_out)
             log_step(
-                "Saved best Phase 2 checkpoint",
+                "Saved best Stage 2 checkpoint",
                 f"epoch={epoch + 1}, val_loss={val_loss:.4f}, "
                 f"qformer={qformer_out}, proj={proj_out}",
             )
@@ -368,7 +368,7 @@ def train_qformer_phase2_generative(cfg):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Q-Former phase 2 generative pretraining")
+    parser = argparse.ArgumentParser(description="Train Q-Former stage 2 generative pretraining")
     parser.add_argument("--cfg-path", default="configs/config.yaml", type=str)
     parser.add_argument(
         "--options", nargs="+", help="Override config settings in key=value format."
@@ -378,9 +378,9 @@ def parse_args():
 
 def main():
     cfg = Config(parse_args())
-    phase2_cfg = cfg.run_cfg.get("qformer_phase2")
-    if phase2_cfg is None:
-        raise KeyError("Missing 'run.qformer_phase2' section in configuration.")
+    stage2_cfg = cfg.run_cfg.get("qformer_stage2")
+    if stage2_cfg is None:
+        raise KeyError("Missing 'run.qformer_stage2' section in configuration.")
 
     required_keys = [
         "seed",
@@ -407,14 +407,14 @@ def main():
         "proj_ckpt_out",
         "output_dir",
     ]
-    missing = [k for k in required_keys if k not in phase2_cfg]
+    missing = [k for k in required_keys if k not in stage2_cfg]
     if missing:
-        raise KeyError("Missing required keys in 'run.qformer_phase2': " + ", ".join(missing))
+        raise KeyError("Missing required keys in 'run.qformer_stage2': " + ", ".join(missing))
 
     first_dataset_key = list(cfg.datasets_cfg.keys())[0]
-    phase2_cfg.data_dir = cfg.datasets_cfg[first_dataset_key].path
+    stage2_cfg.data_dir = cfg.datasets_cfg[first_dataset_key].path
 
-    train_qformer_phase2_generative(phase2_cfg)
+    train_qformer_stage2_generative(stage2_cfg)
 
 
 if __name__ == "__main__":

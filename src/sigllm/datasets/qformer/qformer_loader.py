@@ -1,6 +1,6 @@
 """Shared DataLoader factories for Q-Former alignment pipelines.
 
-Used by both stage 1 representation training and phase 2 generative
+Used by both stage 1 representation training and stage 2 generative
 pretraining so the dataset/collate/loader plumbing stays in one place.
 """
 
@@ -46,7 +46,7 @@ def build_qformer_loader(
         Whether to shuffle the loader.
     filter_fn
         Optional callable that receives the loaded ``QFormerAlignmentDataset``
-        and returns a (possibly subsetted) ``Dataset``. Use this in phase 2
+        and returns a (possibly subsetted) ``Dataset``. Use this in stage 2
         to keep only ``item_text`` samples.
     """
     dataset: Dataset = QFormerAlignmentDataset(filename=filename)
@@ -72,7 +72,7 @@ def build_qformer_loaders(
     """Build train/val/test loaders for the Q-Former alignment task.
 
     Pass ``test_filename=None`` if the calling stage has no test split
-    (phase 2 generative pretraining); the returned ``test_loader`` is
+    (stage 2 generative pretraining); the returned ``test_loader`` is
     ``None`` in that case.
     """
     train_loader = build_qformer_loader(

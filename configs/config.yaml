@@ -24,8 +24,8 @@ model:
 
   qformer_config:
     use_qformer: True
-    qformer_ckpt: "${run.qformer_phase2.output_dir}${run.qformer_phase2.qformer_ckpt_out}" # Q-Former weights after Phase 2 generative pretraining
-    llama_proj_ckpt: "${run.qformer_phase2.output_dir}${run.qformer_phase2.proj_ckpt_out}" # Projection weights after Phase 2 generative pretraining
+    qformer_ckpt: "${run.qformer_stage2.output_dir}${run.qformer_stage2.qformer_ckpt_out}" # Q-Former weights after Stage 2 generative pretraining
+    llama_proj_ckpt: "${run.qformer_stage2.output_dir}${run.qformer_stage2.proj_ckpt_out}" # Projection weights after Stage 2 generative pretraining
     qformer_d_model: 768
     qformer_output_dim: 768 # Keep Q-Former compact; llama_proj maps this to the LLM hidden size.
     qformer_text_model_name: "bert-base-uncased"
@@ -51,7 +51,7 @@ datasets:
 
 run:
   task: rec_pretrain
-  output_dir: "ckpt/qformer_stage2_llm_finetune"
+  output_dir: "ckpt/qformer_stage3_llm_finetune"
   device: "cuda"
   seed: 42
   rec_baseline:
@@ -107,7 +107,7 @@ run:
     freeze_rec: True
     output_dir: "/content/SigLLM/ckpt/qformer_stage1/"
 
-  qformer_phase2:
+  qformer_stage2:
     # BLIP-2-style generative pretraining: train Q-Former + linear projection
     # on next-token LM of item-text captions with the LLM fully frozen (no LoRA).
     seed: 2025
@@ -126,9 +126,9 @@ run:
     llama_model_name: ${model.llama_model}
     pretrained_rec_path: ${model.rec_config.pretrained_path}
     qformer_ckpt_in: "${run.qformer_stage1.output_dir}${run.qformer_stage1.best_qformer_weights_name}"
-    qformer_ckpt_out: "qformer_phase2_best_qformer.pth"
-    proj_ckpt_out: "qformer_phase2_best_proj.pth"
-    output_dir: "/content/SigLLM/ckpt/qformer_phase2/"
+    qformer_ckpt_out: "qformer_stage2_best_qformer.pth"
+    proj_ckpt_out: "qformer_stage2_best_proj.pth"
+    output_dir: "/content/SigLLM/ckpt/qformer_stage2/"
     lr: 1e-4
     weight_decay: 1e-3
     epoch: 20

@@ -1,9 +1,9 @@
-"""Build Q-Former alignment dataset pickles for Stage 1 / Phase 2.
+"""Build Q-Former alignment dataset pickles for Stage 1 / Stage 2.
 
 Run this script once before training. It reads the raw
 ``{train,valid,test}_ood2.pkl`` files under ``datasets[*].path`` and emits
 ``{train,valid,test}_qformer_ood2.pkl`` in the same directory. Stage 1
-representation and Phase 2 generative pipelines then load these pickles via
+representation and Stage 2 generative pipelines then load these pickles via
 ``sigllm.datasets.qformer.qformer_loader``.
 
 Build parameters come from ``run.qformer_stage1`` in the YAML config
@@ -88,7 +88,7 @@ def build_qformer_pkls(cfg) -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Build Q-Former alignment dataset pickles for Stage 1 / Phase 2"
+        description="Build Q-Former alignment dataset pickles for Stage 1 / Stage 2"
     )
     parser.add_argument(
         "--cfg-path",
