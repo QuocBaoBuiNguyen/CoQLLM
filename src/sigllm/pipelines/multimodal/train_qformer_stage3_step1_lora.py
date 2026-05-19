@@ -21,6 +21,7 @@ from sigllm import tasks
 from sigllm.common.config import Config
 from sigllm.common.dist_utils import get_rank, init_distributed_mode
 from sigllm.common.utils import now
+from sigllm.runners.runner_base_rec import RecRunnerBase  # noqa: F401  (registry side-effect)
 
 
 def parse_args():
