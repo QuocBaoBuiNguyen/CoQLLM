@@ -104,6 +104,12 @@ class QRecLLM(Rec2Base):
         max_instruction_length=48,
         freeze_proj=False,
         ablate_soft_tokens=False,
+        use_lora=False,
+        lora_r=8,
+        lora_alpha=16,
+        lora_target_modules=("q_proj", "v_proj"),
+        lora_dropout=0.05,
+        tuning_step=None,
     ):
         super().__init__()
 
@@ -123,6 +129,13 @@ class QRecLLM(Rec2Base):
                 "will be zeroed before injection (Information flow log will show "
                 "target_llama mean/std=0).",
             )
+
+        self.use_lora = bool(use_lora)
+        self.lora_r = int(lora_r)
+        self.lora_alpha = int(lora_alpha)
+        self.lora_target_modules = tuple(lora_target_modules)
+        self.lora_dropout = float(lora_dropout)
+        self.tuning_step = tuning_step
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -145,6 +158,7 @@ class QRecLLM(Rec2Base):
         )
         self._init_projection(proj_token_num, freeze_proj, pretrained_llama_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
+        self._apply_tuning_step_policy()
 
     def _init_rec_model(self, rec_model, rec_config, pretrained_rec, freeze_rec):
         log_step("Loading Rec_model")
@@ -166,7 +180,7 @@ class QRecLLM(Rec2Base):
     def _init_llm_model(self, llama_model):
         log_step(f"Loading LLAMA: {llama_model}")
         model_path = llama_model if llama_model else "./content/ckpt/llm/base"
-        
+
         self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, use_fast=False)
         self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
@@ -175,10 +189,73 @@ class QRecLLM(Rec2Base):
             device_map="auto",
             torch_dtype=torch.float16,
         )
-        
+
         for name, param in self.llama_model.named_parameters():
             param.requires_grad = False
         log_step("Loading LLAMA Done")
+
+        if self.use_lora:
+            self._attach_lora()
+
+    def _attach_lora(self):
+        from peft import LoraConfig, TaskType, get_peft_model
+
+        log_step(
+            "Attaching LoRA to LLaMA",
+            f"r={self.lora_r}, alpha={self.lora_alpha}, "
+            f"target_modules={list(self.lora_target_modules)}, dropout={self.lora_dropout}",
+        )
+        lora_config = LoraConfig(
+            r=self.lora_r,
+            lora_alpha=self.lora_alpha,
+            target_modules=list(self.lora_target_modules),
+            lora_dropout=self.lora_dropout,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
+        self.llama_model = get_peft_model(self.llama_model, lora_config)
+        log_step(
+            "LoRA attached",
+            f"trainable LoRA params={count_trainable_parameters(self.llama_model)}",
+        )
+
+    def _apply_tuning_step_policy(self):
+        step = self.tuning_step
+        if step is None:
+            return
+
+        if int(step) == 1:
+            for p in self.qformer.parameters():
+                p.requires_grad = False
+            for p in self.llama_proj.parameters():
+                p.requires_grad = False
+            self.qformer.eval()
+            self.qformer.train = disabled_train
+            self.llama_proj.eval()
+            self.llama_proj.train = disabled_train
+            log_step(
+                "Tuning step 1",
+                "LoRA trainable; Q-Former, projection, MF and base LLM all frozen.",
+            )
+
+        elif int(step) == 2:
+            if hasattr(self.llama_model, "peft_config"):
+                for n, p in self.llama_model.named_parameters():
+                    if "lora_" in n:
+                        p.requires_grad = False
+            for p in self.qformer.parameters():
+                p.requires_grad = True
+            self.qformer.train()
+            for p in self.llama_proj.parameters():
+                p.requires_grad = True
+            self.llama_proj.train()
+            log_step(
+                "Tuning step 2",
+                "Q-Former + projection trainable; LoRA, base LLM and MF frozen.",
+            )
+
+        else:
+            log_step("Tuning step", f"unrecognized value '{step}', no policy applied")
 
     def _init_qformer(
         self,
@@ -294,11 +371,22 @@ class QRecLLM(Rec2Base):
         if self._has_logged_trainable_stats:
             return
 
+        llama_total = (
+            count_trainable_parameters(self.llama_model) if self.llama_model is not None else 0
+        )
+        lora_total = 0
+        if self.llama_model is not None and hasattr(self.llama_model, "peft_config"):
+            lora_total = sum(
+                p.numel()
+                for n, p in self.llama_model.named_parameters()
+                if "lora_" in n and p.requires_grad
+            )
         stats = [
             f"rec_encoder={count_trainable_parameters(self.rec_encoder) if self.rec_encoder is not None else 0}",
             f"qformer={count_trainable_parameters(self.qformer) if self.qformer is not None else 0}",
             f"llama_proj={count_trainable_parameters(self.llama_proj) if hasattr(self, 'llama_proj') else 0}",
-            f"llama_model={count_trainable_parameters(self.llama_model) if self.llama_model is not None else 0}",
+            f"llama_model={llama_total}",
+            f"llama_lora={lora_total}",
         ]
         log_step("Trainable parameter counts", ", ".join(stats))
         self._has_logged_trainable_stats = True
@@ -361,6 +449,11 @@ class QRecLLM(Rec2Base):
         for prompt in self.prompt_list:
             for id_term in id_terms:
                 if id_term in prompt:
+                    return True
+
+        if self.llama_model is not None and hasattr(self.llama_model, "peft_config"):
+            for n, p in self.llama_model.named_parameters():
+                if "lora_" in n and p.requires_grad:
                     return True
 
         return False
@@ -712,15 +805,24 @@ class QRecLLM(Rec2Base):
     def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
         feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
         batch_size = batch_data["UserID"].shape[0]
-        # Do NOT pass the verbose stage 2 prompt as the Q-Former instruction;
-        # it would be truncated to max_instruction_length and identical across
-        # every row. Use short item-text instructions matching stage 1.
-        instruction_list = self._build_qformer_instructions(batch_size)
-        rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(
-            batch_data,
-            feature_order=feature_order,
-            instruction_list=instruction_list,
-        )
+
+        if not feature_order:
+            self._log_trainable_module_stats()
+            rec_embeds = {
+                "User_emb": None,
+                "TargetItem_emb": None,
+                "InteractedItems_embs": None,
+                "merged_embs": None,
+            }
+            rec_atts = None
+        else:
+            instruction_list = self._build_qformer_instructions(batch_size)
+            rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(
+                batch_data,
+                feature_order=feature_order,
+                instruction_list=instruction_list,
+            )
+
         llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
         return llm_embeds, llm_atts
 
@@ -831,6 +933,14 @@ class QRecLLM(Rec2Base):
         pretrained_llama_proj = qformer_config.get("llama_proj_ckpt")
         ablate_soft_tokens = cfg.get("ablate_soft_tokens", False)
 
+        lora_cfg = cfg.get("lora_config") or {}
+        use_lora = bool(lora_cfg.get("use_lora", False))
+        lora_r = int(lora_cfg.get("r", 8))
+        lora_alpha = int(lora_cfg.get("alpha", 16))
+        lora_target_modules = lora_cfg.get("target_modules", ["q_proj", "v_proj"])
+        lora_dropout = float(lora_cfg.get("dropout", 0.05))
+        tuning_step = cfg.get("tuning_step", None)
+
         model = cls(
             rec_model=rec_model,
             rec_config=rec_config,
@@ -853,6 +963,12 @@ class QRecLLM(Rec2Base):
             max_instruction_length=max_instruction_length,
             freeze_proj=freeze_proj,
             ablate_soft_tokens=ablate_soft_tokens,
+            use_lora=use_lora,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_target_modules=lora_target_modules,
+            lora_dropout=lora_dropout,
+            tuning_step=tuning_step,
         )
 
         ckpt_path = cfg.get("ckpt", "")

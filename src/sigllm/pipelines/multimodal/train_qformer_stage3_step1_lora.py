@@ -1,34 +1,38 @@
+"""CoLLM Step 1 — train LoRA only on text-only prompts.
+
+The Q-Former, projection, MF and base LLM are all frozen; only the LoRA
+adapter on the LLM is updated. The text-only prompt is identical in shape to
+the full Stage 3 prompt but with the soft-token placeholders (`<ItemIDList>`,
+`<TargetItemID>`) removed, so the LLM learns the recommendation task without
+any collaborative-filtering signal. The best checkpoint feeds Step 2.
+"""
+
 import argparse
-from html import parser
 import os
 import random
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import torch
 import torch.backends.cudnn as cudnn
-
 from torch.distributed.elastic.multiprocessing.errors import record
 
 from sigllm import tasks
-from sigllm.common import registry
 from sigllm.common.config import Config
-from sigllm.common.utils import now
 from sigllm.common.dist_utils import get_rank, init_distributed_mode
-from datetime import datetime
-from sigllm.runners.runner_base_rec import RecRunnerBase
+from sigllm.common.utils import now
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train LLM for recommendation")
-    parser.add_argument("--cfg-path", default="/content/SigLLM/configs/config.yaml",type=str, required=True, help="Path to the config file.")
+    parser = argparse.ArgumentParser(description="Train Stage 3 Step 1 — LoRA on text-only prompts")
+    parser.add_argument("--cfg-path", type=str, required=True, help="Path to the config file.")
     parser.add_argument(
         "--options",
         nargs="+",
-        help="override some settings in the used config, the key-value pair "
-        "in xxx=yyy format will be merged into config file (deprecate), "
-        "change to --cfg-options instead.",
+        help="override some settings in the used config",
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
+
 
 def setup_seeds(config):
     seed = config.run_cfg.seed + get_rank()
@@ -38,15 +42,26 @@ def setup_seeds(config):
     cudnn.benchmark = False
     cudnn.deterministic = True
 
+
+def apply_step1_overrides(cfg):
+    step1 = cfg.run_cfg.qformer_stage3_step1
+    cfg.model_cfg.tuning_step = 1
+    cfg.model_cfg.prompt_path = step1.prompt_path
+    cfg.model_cfg.ckpt = None
+    cfg.run_cfg.output_dir = step1.output_dir
+    cfg.run_cfg.init_lr = step1.init_lr
+    cfg.run_cfg.max_epoch = step1.max_epoch
+
+
 @record
 def main():
     job_id = now()
     cfg = Config(parse_args())
+    apply_step1_overrides(cfg)
     init_distributed_mode(cfg.run_cfg)
     setup_seeds(cfg)
 
     task = tasks.setup_task(cfg=cfg)
-
     datasets = task.build_datasets(cfg=cfg)
 
     first_dataset_key = list(cfg.datasets_cfg.keys())[0]
@@ -56,17 +71,14 @@ def main():
     test_ = pd.read_pickle(os.path.join(data_dir, "test_ood2.pkl"))
     user_num = max(train_.uid.max(), valid_.uid.max(), test_.uid.max()) + 1
     item_num = max(train_.iid.max(), valid_.iid.max(), test_.iid.max()) + 1
-    # TEMP_DISABLED_USER_CF: keep user_num for dataset/eval and pretrained MF loading,
-    # but QRecLLM no longer injects mf.user_encoder(UserID) into the LLM prompt.
     cfg.model_cfg.rec_config.user_num = int(user_num)
     cfg.model_cfg.rec_config.item_num = int(item_num)
     cfg.pretty_print()
 
     model = task.build_model(cfg=cfg)
-    
     runner = task.build_runner(cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets)
-
     runner.train()
+
 
 if __name__ == "__main__":
     main()
