@@ -214,16 +214,42 @@ class QRecLLM(Rec2Base):
             self._soft_token_str = tok.unk_token
             self._soft_token_id = tok.unk_token_id
             return
-        for candidate in ("<|extra_0|>", "<|reserved_0|>", "<|fim_pad|>"):
+
+        skip_ids = {tok.eos_token_id, tok.pad_token_id, tok.bos_token_id}
+        skip_ids.discard(None)
+
+        hardcoded = (
+            "<|extra_0|>", "<|reserved_0|>", "<|fim_pad|>",
+            "<|object_ref_start|>", "<|object_ref_end|>",
+            "<|box_start|>", "<|box_end|>",
+            "<|quad_start|>", "<|quad_end|>",
+            "<|vision_start|>", "<|vision_end|>", "<|vision_pad|>",
+            "<|image_pad|>", "<|video_pad|>",
+            "<|im_start|>",
+        )
+        for candidate in hardcoded:
             ids = tok(candidate, add_special_tokens=False).input_ids
-            if len(ids) == 1:
+            if len(ids) == 1 and ids[0] not in skip_ids:
                 self._soft_token_str = candidate
                 self._soft_token_id = ids[0]
                 return
+
+        added = getattr(tok, "added_tokens_decoder", None) or {}
+        for token_id, added_token in added.items():
+            if token_id in skip_ids:
+                continue
+            content = getattr(added_token, "content", str(added_token))
+            ids = tok(content, add_special_tokens=False).input_ids
+            if len(ids) == 1 and ids[0] == token_id:
+                self._soft_token_str = content
+                self._soft_token_id = token_id
+                return
+
         log_step(
             "Soft-token fallback",
-            "no unk_token and no reserved single-token candidate; using eos_token "
-            "as soft-slot placeholder. May confuse the LM if eos appears mid-sequence.",
+            "no unk_token and no safe single-token candidate; using eos_token "
+            "as soft-slot placeholder. Soft slots will COLLIDE with padding if "
+            "pad_token == eos_token — Step 2 may corrupt embeddings silently.",
         )
         self._soft_token_str = tok.eos_token
         self._soft_token_id = tok.eos_token_id
