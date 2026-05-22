@@ -5,7 +5,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from transformers import LlamaTokenizer, LlamaForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 import os
 
@@ -178,24 +178,55 @@ class QRecLLM(Rec2Base):
         log_step("Loading Rec_model Done")
 
     def _init_llm_model(self, llama_model):
-        log_step(f"Loading LLAMA: {llama_model}")
+        log_step(f"Loading LLM: {llama_model}")
         model_path = llama_model if llama_model else "./content/ckpt/llm/base"
 
-        self.llama_tokenizer = LlamaTokenizer.from_pretrained(model_path, use_fast=False)
-        self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
+        self.llama_tokenizer = AutoTokenizer.from_pretrained(
+            model_path, use_fast=False, trust_remote_code=True,
+        )
+        if self.llama_tokenizer.pad_token is None:
+            self.llama_tokenizer.pad_token = self.llama_tokenizer.eos_token
 
-        self.llama_model = LlamaForCausalLM.from_pretrained(
+        self.llama_model = AutoModelForCausalLM.from_pretrained(
             model_path,
             device_map="auto",
             torch_dtype=torch.float16,
+            trust_remote_code=True,
         )
 
         for name, param in self.llama_model.named_parameters():
             param.requires_grad = False
-        log_step("Loading LLAMA Done")
+
+        self._resolve_soft_token_placeholder()
+        log_step(
+            "Loading LLM Done",
+            f"hidden_size={self.llama_model.config.hidden_size}, "
+            f"pad_token_id={self.llama_tokenizer.pad_token_id}, "
+            f"soft_token_id={self._soft_token_id} ('{self._soft_token_str}')",
+        )
 
         if self.use_lora:
             self._attach_lora()
+
+    def _resolve_soft_token_placeholder(self):
+        tok = self.llama_tokenizer
+        if tok.unk_token_id is not None:
+            self._soft_token_str = tok.unk_token
+            self._soft_token_id = tok.unk_token_id
+            return
+        for candidate in ("<|extra_0|>", "<|reserved_0|>", "<|fim_pad|>"):
+            ids = tok(candidate, add_special_tokens=False).input_ids
+            if len(ids) == 1:
+                self._soft_token_str = candidate
+                self._soft_token_id = ids[0]
+                return
+        log_step(
+            "Soft-token fallback",
+            "no unk_token and no reserved single-token candidate; using eos_token "
+            "as soft-slot placeholder. May confuse the LM if eos appears mid-sequence.",
+        )
+        self._soft_token_str = tok.eos_token
+        self._soft_token_id = tok.eos_token_id
 
     def _attach_lora(self):
         from peft import LoraConfig, TaskType, get_peft_model
@@ -613,10 +644,10 @@ class QRecLLM(Rec2Base):
         
         prompt_ori = prompt_template
         batch_size = batch_data['UserID'].shape[0]
-        bos = self.llama_tokenizer.bos_token if self.llama_tokenizer.bos_token else "<s>"
-        
-        unk_token = self.llama_tokenizer.unk_token
-        unk_seq = " ".join([unk_token] * self.proj_token_num) 
+        bos = self.llama_tokenizer.bos_token if self.llama_tokenizer.bos_token else ""
+
+        unk_token = self._soft_token_str
+        unk_seq = " ".join([unk_token] * self.proj_token_num)
         
         prompt_template = bos + prompt_template 
         # TEMP_DISABLED_USER_CF: old prompt path replaced <UserID> with soft tokens.
@@ -668,7 +699,7 @@ class QRecLLM(Rec2Base):
             add_special_tokens=False
         ).to(batch_data['UserID'].device)
 
-        unk_token_id = self.llama_tokenizer.unk_token_id
+        unk_token_id = self._soft_token_id
         
         embed_layer = self.llama_model.get_input_embeddings()
         inputs_embeds = embed_layer(prompts_tokens.input_ids)
