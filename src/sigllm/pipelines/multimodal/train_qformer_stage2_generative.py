@@ -152,8 +152,9 @@ def _build_inputs(
     embed_layer: nn.Module,
     max_caption_length: int,
 ):
-    """Assemble ``[BOS][K soft tokens][caption + EOS]`` with -100 labels on
-    BOS + soft positions."""
+    """Assemble ``[BOS?][K soft tokens][caption + EOS]`` with -100 labels on
+    the prefix (BOS + soft positions). Tokenizers without an explicit BOS
+    (e.g. Qwen2) skip the BOS slot entirely; the loss target is unchanged."""
 
     device = soft_tokens.device
     batch_size, query_count, hidden = soft_tokens.shape
@@ -172,18 +173,23 @@ def _build_inputs(
     cap_mask = cap_tokens.attention_mask
 
     cap_embeds = embed_layer(cap_ids).to(soft_tokens.dtype)
-
-    bos_ids = torch.full(
-        (batch_size, 1), tokenizer.bos_token_id, dtype=torch.long, device=device
-    )
-    bos_embeds = embed_layer(bos_ids).to(soft_tokens.dtype)
-    bos_mask = torch.ones((batch_size, 1), dtype=cap_mask.dtype, device=device)
     soft_mask = torch.ones((batch_size, query_count), dtype=cap_mask.dtype, device=device)
 
-    inputs_embeds = torch.cat([bos_embeds, soft_tokens, cap_embeds], dim=1)
-    attention_mask = torch.cat([bos_mask, soft_mask, cap_mask], dim=1)
+    has_bos = tokenizer.bos_token_id is not None
+    if has_bos:
+        bos_ids = torch.full(
+            (batch_size, 1), tokenizer.bos_token_id, dtype=torch.long, device=device
+        )
+        bos_embeds = embed_layer(bos_ids).to(soft_tokens.dtype)
+        bos_mask = torch.ones((batch_size, 1), dtype=cap_mask.dtype, device=device)
+        inputs_embeds = torch.cat([bos_embeds, soft_tokens, cap_embeds], dim=1)
+        attention_mask = torch.cat([bos_mask, soft_mask, cap_mask], dim=1)
+        prefix_len = 1 + query_count
+    else:
+        inputs_embeds = torch.cat([soft_tokens, cap_embeds], dim=1)
+        attention_mask = torch.cat([soft_mask, cap_mask], dim=1)
+        prefix_len = query_count
 
-    prefix_len = 1 + query_count
     prefix_labels = torch.full(
         (batch_size, prefix_len), -100, dtype=torch.long, device=device
     )
