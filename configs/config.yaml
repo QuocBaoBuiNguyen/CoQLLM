@@ -116,7 +116,7 @@ run:
     max_item_item_pairs: null
     max_user_item_pairs: null
     include_user_item: True
-    lr: 2e-4
+    lr: 5e-5
     w_itc: 1.0
     w_itm: 1.0
     w_itg: 1.0
