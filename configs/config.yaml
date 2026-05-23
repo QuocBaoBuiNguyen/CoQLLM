@@ -27,9 +27,9 @@ model:
 
   lora_config:
     use_lora: True
-    r: 8
-    alpha: 16
-    target_modules: [q_proj, v_proj]
+    r: 16
+    alpha: 32
+    target_modules: [q_proj, k_proj, v_proj, o_proj]
     dropout: 0.05
 
   max_txt_len: 1024
