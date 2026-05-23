@@ -60,6 +60,10 @@ class RecBaseDatasetBuilder(ABC):
                 filename="test_ood2.pkl",
             )
         else:
+            datasets["test"] = dataset_cls(
+                dataset_config=self.dataset_config,
+                filename="test_ood2.pkl",
+            )
             warm_cold_filename = "test_warm_cold_ood2.pkl"
             warm_cold_path = Path(storage_path) / warm_cold_filename
             if warm_cold_path.exists():
