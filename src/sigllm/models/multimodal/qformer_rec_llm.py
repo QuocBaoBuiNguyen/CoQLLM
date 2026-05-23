@@ -296,27 +296,26 @@ class QRecLLM(Rec2Base):
             )
 
         elif int(step) == 2:
-            # Q-Former is FROZEN here (was previously trainable). After 8-layer
-            # upgrade Q-Former carries ~110M params; training it on 33k Yes/No
-            # samples would push trainable/sample ratio to ~3400 and overfit
-            # heavily (cf. A test with r=16 LoRA already overfit at 1900
-            # params/sample). ILM/CoLLM also keep their item encoder frozen
-            # during Stage 3 — only the projection adapts to the recommendation
-            # task. Q-Former representations stay as learned in Stage 1+2.
+            # CoLLM Equation (5), Ω = ϕ variant: Q-Former + projection trainable,
+            # LoRA + base LLM + MF frozen. Q-Former was briefly frozen here as an
+            # α2 experiment (theory: 8-layer Q-Former too large for 33k samples);
+            # plateaued at uAUC ~0.694, below baseline 0.708, because llm_proj
+            # alone (~2.8M params) lacks capacity to fix the CIE channel. Unfrozen
+            # again to let Q-Former co-adapt with projection on the recommendation
+            # task — matches the original CoLLM recipe.
             if hasattr(self.llm_model, "peft_config"):
                 for n, p in self.llm_model.named_parameters():
                     if "lora_" in n:
                         p.requires_grad = False
             for p in self.qformer.parameters():
-                p.requires_grad = False
-            self.qformer.eval()
-            self.qformer.train = disabled_train
+                p.requires_grad = True
+            self.qformer.train()
             for p in self.llm_proj.parameters():
                 p.requires_grad = True
             self.llm_proj.train()
             log_step(
                 "Tuning step 2",
-                "Projection trainable; Q-Former, LoRA, base LLM and MF frozen.",
+                "Q-Former + projection trainable; LoRA, base LLM and MF frozen.",
             )
 
         else:
