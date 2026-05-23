@@ -212,7 +212,7 @@ run:
   mode: "v2"
   train_splits: ["train"]
   valid_splits: ["valid"]
-  test_splits: ["test", "valid"]
+  test_splits: ["test", "test_warm", "test_cold", "valid"]
   resume_ckpt_path: null
 
   # Distributed
