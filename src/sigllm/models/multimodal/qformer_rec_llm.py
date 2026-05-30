@@ -110,6 +110,7 @@ class QRecLLM(Rec2Base):
         lora_target_modules=("q_proj", "v_proj"),
         lora_dropout=0.05,
         tuning_step=None,
+        user_conditioned=False,
     ):
         super().__init__()
 
@@ -136,6 +137,15 @@ class QRecLLM(Rec2Base):
         self.lora_target_modules = tuple(lora_target_modules)
         self.lora_dropout = float(lora_dropout)
         self.tuning_step = tuning_step
+        self.user_conditioned = bool(user_conditioned)
+
+        if self.user_conditioned:
+            log_step(
+                "USER-CONDITIONED MODE",
+                "user_conditioned=True → Q-Former queries are shifted per-user by "
+                "user_proj(user_cf) before forward, so the same Q tokens encode "
+                "different aspects of an item depending on which user is asking.",
+            )
 
         log_step("Running MiniGPT4Rec_v2 initialization")
 
@@ -155,6 +165,8 @@ class QRecLLM(Rec2Base):
             freeze_qformer=False,
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
+            user_conditioned=self.user_conditioned,
+            d_user=rec_config.embedding_size,
         )
         self._init_projection(proj_token_num, freeze_proj, pretrained_llm_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
@@ -333,6 +345,8 @@ class QRecLLM(Rec2Base):
         freeze_qformer: bool,
         qformer_text_model_name: str,
         max_instruction_length: int,
+        user_conditioned: bool = False,
+        d_user: int = None,
     ):
         log_step("Loading QFormer")
         log_step(
@@ -350,6 +364,8 @@ class QRecLLM(Rec2Base):
             qformer_text_model_name=qformer_text_model_name,
             max_instruction_length=max_instruction_length,
             init_from_pretrained_text=False,
+            user_conditioned=user_conditioned,
+            d_user=d_user,
         ).to(self.device)
 
         if pretrained_qformer and pretrained_qformer != "not_have":
@@ -357,7 +373,17 @@ class QRecLLM(Rec2Base):
             state_dict = ckpt
             if isinstance(state_dict, dict) and any(k.startswith("qformer.") for k in state_dict.keys()):
                 state_dict = {k.replace("qformer.", "", 1): v for k, v in state_dict.items()}
-            self.qformer.load_state_dict(state_dict, strict=True)
+            load_msg = self.qformer.load_state_dict(state_dict, strict=False)
+            if load_msg.missing_keys:
+                log_step(
+                    "QFormer ckpt missing keys (kept at init)",
+                    ", ".join(load_msg.missing_keys),
+                )
+            if load_msg.unexpected_keys:
+                log_step(
+                    "QFormer ckpt unexpected keys (ignored)",
+                    ", ".join(load_msg.unexpected_keys),
+                )
             log_step("Successfully loaded QFormer checkpoint", pretrained_qformer)
 
         # 3) freeze / train tiếp
@@ -601,9 +627,16 @@ class QRecLLM(Rec2Base):
             user_llm = None
             target_cf = self.rec_encoder.item_encoder(batch_data["TargetItemID"])  # [B,d_cf]
 
+            # User-conditioned queries: user_cf shifts the base Q tokens so the
+            # same queries extract per-user-relevant aspects of each item. Pulled
+            # ONLY when the flag is on so the vanilla path stays untouched.
+            user_cf_for_q = None
+            if self.user_conditioned:
+                user_cf_for_q = self.rec_encoder.user_encoder(batch_data["UserID"])  # [B,d_cf]
+
             # 2) QFormer outputs (instruction-conditioned)
             # user_q = self.qformer(user_cf, ins_list)        # [B,Q,d_model]
-            target_q = self.qformer(target_cf, ins_list)      # [B,Q,d_model]
+            target_q = self.qformer(target_cf, ins_list, user_cf=user_cf_for_q)  # [B,Q,d_model]
 
             # 3) Project to LLM hidden per token
             # user_llm = self.llm_proj(user_q)               # [B,Q,H]
@@ -631,7 +664,17 @@ class QRecLLM(Rec2Base):
                 inter_cf_flat = inter_cf.reshape(B * L, -1)                               # [B*L,d_cf]
                 inter_ins_list = [ins for ins in ins_list for _ in range(L)]               # len B*L
 
-                inter_q_flat = self.qformer(inter_cf_flat, inter_ins_list)                 # [B*L,Q,d_model]
+                # Repeat each user's CF L times so every history item in the flat
+                # batch sees its owning user's conditioning vector.
+                user_cf_flat_for_q = None
+                if self.user_conditioned and user_cf_for_q is not None:
+                    user_cf_flat_for_q = (
+                        user_cf_for_q.unsqueeze(1).expand(-1, L, -1).reshape(B * L, -1)
+                    )
+
+                inter_q_flat = self.qformer(
+                    inter_cf_flat, inter_ins_list, user_cf=user_cf_flat_for_q,
+                )                                                                          # [B*L,Q,d_model]
                 inter_llm_flat2 = self.llm_proj(inter_q_flat)                         # [B*L,Q,H]
                 if self.ablate_soft_tokens:
                     inter_llm_flat2 = torch.zeros_like(inter_llm_flat2)
@@ -995,6 +1038,7 @@ class QRecLLM(Rec2Base):
         qformer_text_model_name = qformer_config.get("qformer_text_model_name", "bert-base-uncased")
         max_instruction_length = qformer_config.get("max_instruction_length", 48)
         pretrained_llm_proj = qformer_config.get("llm_proj_ckpt")
+        user_conditioned = bool(qformer_config.get("user_conditioned", False))
         ablate_soft_tokens = cfg.get("ablate_soft_tokens", False)
 
         lora_cfg = cfg.get("lora_config") or {}
@@ -1033,6 +1077,7 @@ class QRecLLM(Rec2Base):
             lora_target_modules=lora_target_modules,
             lora_dropout=lora_dropout,
             tuning_step=tuning_step,
+            user_conditioned=user_conditioned,
         )
 
         ckpt_path = cfg.get("ckpt", "")

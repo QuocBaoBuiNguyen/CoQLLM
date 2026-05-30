@@ -58,6 +58,8 @@ class HFQFormerAdapter(nn.Module):
         qformer_text_model_name: str = "bert-base-uncased",
         max_instruction_length: int = 48,
         init_from_pretrained_text: bool = True,
+        user_conditioned: bool = False,
+        d_user: Optional[int] = None,
     ):
         super().__init__()
 
@@ -80,6 +82,22 @@ class HFQFormerAdapter(nn.Module):
         self.q = Parameter(torch.randn(1, num_queries, d_model))
         self.proj_cf = nn.Linear(d_cf, d_model)
         self.out_proj = nn.Identity() if self.output_dim == d_model else nn.Linear(d_model, self.output_dim)
+
+        # User-conditioned queries (Stage 3 personalization). When enabled, the
+        # base learnable queries `self.q` are shifted per-user by `user_proj(user_cf)`
+        # before the Q-Former forward. Stage 1/2 paths never pass `user_cf` so the
+        # path stays a no-op there even when this flag is True.
+        self.user_conditioned = bool(user_conditioned)
+        if self.user_conditioned:
+            d_user_eff = int(d_user) if d_user is not None else d_cf
+            self.d_user = d_user_eff
+            self.user_proj = nn.Linear(d_user_eff, d_model)
+            # Zero-init so the residual `queries = pretrained_q + user_proj(user_cf)`
+            # starts as a no-op at step 0 (queries == pretrained_q exactly). Gradients
+            # still flow through user_cf, so user_proj grows from 0 only if CTR signal
+            # rewards it. Standard pattern for LoRA / FiLM / prefix tuning.
+            nn.init.zeros_(self.user_proj.weight)
+            nn.init.zeros_(self.user_proj.bias)
 
         config = InstructBlipQFormerConfig(
             vocab_size=len(self.qformer_tokenizer),
@@ -223,6 +241,32 @@ class HFQFormerAdapter(nn.Module):
         )
         return encoder_hidden_states, encoder_attention_mask
 
+    def _build_query_tokens(
+        self,
+        batch_size: int,
+        user_cf: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        """Expand base learnable queries and optionally shift per-user.
+
+        When ``user_conditioned`` is on and ``user_cf`` is provided, each query
+        token is shifted by ``user_proj(user_cf)`` so the same Q tokens encode
+        different aspects for different users. Otherwise queries are identical
+        across the batch (vanilla Q-Former behaviour).
+        """
+        query_tokens = self.q.expand(batch_size, -1, -1)
+        if self.user_conditioned and user_cf is not None:
+            if user_cf.dim() != 2:
+                raise ValueError(
+                    f"Expected user_cf shape [B, d_user], got {tuple(user_cf.shape)}"
+                )
+            if user_cf.size(0) != batch_size:
+                raise ValueError(
+                    f"user_cf batch ({user_cf.size(0)}) != cf_vec batch ({batch_size})"
+                )
+            user_cond = self.user_proj(user_cf).unsqueeze(1)  # [B, 1, d_model]
+            query_tokens = query_tokens + user_cond
+        return query_tokens
+
     def _build_causal_joint_mask(
         self,
         batch_size: int,
@@ -248,7 +292,11 @@ class HFQFormerAdapter(nn.Module):
         mask[:, query_count:, :] = mask[:, query_count:, :] * row_pad
         return mask
 
-    def encode_cf(self, cf_vec: torch.Tensor) -> torch.Tensor:
+    def encode_cf(
+        self,
+        cf_vec: torch.Tensor,
+        user_cf: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Queries-only forward over a CF (collaborative filtering) vector.
 
         The recommendation signal enters via cross-attention to a single CF
@@ -258,7 +306,7 @@ class HFQFormerAdapter(nn.Module):
         or raw (contrastive) representation.
         """
         batch_size = cf_vec.size(0)
-        query_tokens = self.q.expand(batch_size, -1, -1)
+        query_tokens = self._build_query_tokens(batch_size, user_cf)
         query_attention_mask = torch.ones(
             batch_size, query_tokens.size(1), dtype=torch.long, device=cf_vec.device
         )
@@ -308,6 +356,7 @@ class HFQFormerAdapter(nn.Module):
         text: Union[str, list],
         causal_text: bool = False,
         max_text_length: Optional[int] = None,
+        user_cf: Optional[torch.Tensor] = None,
     ):
         """Joint forward returning ``(query_hidden, text_hidden, text_ids, text_mask)``.
 
@@ -321,7 +370,7 @@ class HFQFormerAdapter(nn.Module):
         batch_size = cf_vec.size(0)
         text_list = self._normalize_text_input(text, batch_size)
 
-        query_tokens = self.q.expand(batch_size, -1, -1)
+        query_tokens = self._build_query_tokens(batch_size, user_cf)
         query_count = query_tokens.size(1)
 
         text_ids, text_attention_mask = self._tokenize(
@@ -354,12 +403,17 @@ class HFQFormerAdapter(nn.Module):
         text_hidden = sequence_hidden[:, query_count:]
         return query_hidden, text_hidden, text_ids, text_attention_mask
 
-    def forward(self, cf_vec: torch.Tensor, instruction) -> torch.Tensor:
+    def forward(
+        self,
+        cf_vec: torch.Tensor,
+        instruction,
+        user_cf: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """LLM-feeding mode: queries cross-attend to ``cf_vec`` while the text
         stream consumes ``instruction``. Returns query hidden states with
         ``out_proj`` applied: ``[B, num_queries, output_dim]``."""
 
         query_hidden, _, _, _ = self.forward_multimodal(
-            cf_vec, instruction, causal_text=False
+            cf_vec, instruction, causal_text=False, user_cf=user_cf
         )
         return self.out_proj(query_hidden)
