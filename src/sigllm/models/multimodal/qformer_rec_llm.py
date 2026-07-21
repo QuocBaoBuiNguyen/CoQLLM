@@ -111,6 +111,10 @@ class QRecLLM(Rec2Base):
         lora_dropout=0.05,
         tuning_step=None,
         user_conditioned=False,
+        ranking_loss_weight=0.0,
+        ranking_loss_tau=1.0,
+        align_rank_loss_weight=0.0,
+        align_rank_loss_tau=1.0,
     ):
         super().__init__()
 
@@ -138,6 +142,23 @@ class QRecLLM(Rec2Base):
         self.lora_dropout = float(lora_dropout)
         self.tuning_step = tuning_step
         self.user_conditioned = bool(user_conditioned)
+
+        # uAUC-aligned auxiliary losses (opt-in). ranking_loss shapes the LLM's
+        # Yes/No margin; align_rank_loss shapes the aligned CF soft tokens. Both
+        # are per-user BPR (a uAUC surrogate) and need a user-grouped batch
+        # sampler to have same-user pos/neg pairs. weight=0.0 -> disabled.
+        self.ranking_loss_weight = float(ranking_loss_weight)
+        self.ranking_loss_tau = float(ranking_loss_tau)
+        if self.ranking_loss_weight > 0.0:
+            log_step(
+                "uAUC ranking loss ACTIVE",
+                f"L = BCE + {self.ranking_loss_weight} * per-user BPR "
+                f"(tau={self.ranking_loss_tau}). Needs a user-grouped batch sampler "
+                f"to be effective.",
+            )
+        self.align_rank_loss_weight = float(align_rank_loss_weight)
+        self.align_rank_loss_tau = float(align_rank_loss_tau)
+        self.align_rank_head = None
 
         if self.user_conditioned:
             log_step(
@@ -171,6 +192,9 @@ class QRecLLM(Rec2Base):
         self._init_projection(proj_token_num, freeze_proj, pretrained_llm_proj)
         self._init_prompts(prompt_path, prompt_template, max_txt_len, end_sym)
         self._apply_tuning_step_policy()
+        # Built after the LLM (reads hidden_size) and after the step policy so it
+        # co-trains with the unfrozen Q-Former/projection at Step 2.
+        self._init_align_rank_head()
 
     def _init_rec_model(self, rec_model, rec_config, pretrained_rec, freeze_rec):
         log_step("Loading Rec_model")
@@ -850,20 +874,132 @@ class QRecLLM(Rec2Base):
                 return_dict=True,
             )
 
-    def calculate_recommendation_loss(self, outputs, label_tokens, batch_data, ans_map):
+    def _init_align_rank_head(self):
+        """Build the auxiliary head for the rank-preserving alignment loss.
+
+        Reads a scalar CTR-like score off the aligned CF soft tokens
+        (``cf_emb``, ``[B, Q, H]`` pooled over queries) so a per-user BPR term
+        can force the ALIGNED representation to preserve within-user ordering.
+        Only built when the loss is enabled; a fresh ``nn.Linear`` is trainable
+        by default, and the step-2 policy already leaves non-LoRA modules
+        unfrozen, so it co-trains with the Q-Former/projection at Step 2.
+        """
+        if self.align_rank_loss_weight <= 0.0:
+            self.align_rank_head = None
+            return
+        H = int(self.llm_model.config.hidden_size)
+        self.align_rank_head = nn.Linear(H, 1)
+        log_step(
+            "Rank-preserving alignment loss ACTIVE",
+            f"aux per-user BPR on the aligned CF tokens "
+            f"(weight={self.align_rank_loss_weight}, tau={self.align_rank_loss_tau}). "
+            f"Needs a user-grouped batch sampler, same as ranking_loss.",
+        )
+
+    def _per_user_pairwise_loss(self, scores, users, labels, tau=None):
+        """Per-user pairwise BPR — a differentiable surrogate for uAUC.
+
+        For every (positive, negative) pair belonging to the SAME user inside
+        the batch, push s_pos above s_neg via -log sigmoid((s_pos - s_neg)/tau).
+        Returns a scalar; 0 (graph-preserving) when the batch holds no valid
+        same-user pos/neg pair, so it never NaNs on unlucky batches.
+
+        The aggregation is USER-WEIGHTED to match uAUC: pair losses are first
+        averaged within each user, then averaged across users. A flat mean over
+        all pairs would weight users by their pair count (users with many items
+        dominate the gradient), which optimises a pair-weighted objective ≈
+        global AUC rather than the user-weighted uAUC.
+
+        NOTE: effectiveness depends on batches containing multiple items per
+        user (mixed labels). With purely random batching same-user pairs are
+        rare — pair this with a user-grouped batch sampler.
+        """
+        users = users.view(-1)
+        labels = labels.view(-1).long()
+        pos_mask = labels == 1
+        neg_mask = labels == 0
+
+        # diff[i, j] = s_i - s_j ; valid when i is a positive and j a negative
+        # of the same user.
+        diff = scores.unsqueeze(1) - scores.unsqueeze(0)                  # [B, B]
+        same_user = users.unsqueeze(1) == users.unsqueeze(0)             # [B, B]
+        valid = same_user & pos_mask.unsqueeze(1) & neg_mask.unsqueeze(0)
+
+        if valid.sum() == 0:
+            return scores.sum() * 0.0  # no pairs this batch -> 0, keep the graph
+
+        # -log sigmoid(x) = softplus(-x), numerically stable. Zero out the
+        # invalid entries so they contribute nothing to the per-user sums.
+        valid_f = valid.to(scores.dtype)
+        tau = self.ranking_loss_tau if tau is None else tau
+        pair_losses = nn.functional.softplus(-diff / tau) * valid_f
+
+        # Each pair (i, j) belongs to user users[i] (== users[j]). Collapse the
+        # neg axis, then scatter-add rows into their user bucket so every user
+        # gets its own (sum, count) -> within-user mean.
+        row_loss_sum = pair_losses.sum(dim=1)                            # [B]
+        row_pair_count = valid_f.sum(dim=1)                             # [B]
+
+        uniq_users, inv = torch.unique(users, return_inverse=True)
+        n_users = uniq_users.numel()
+        # scatter_add_ requires self, index and src to share device and (for
+        # self/src) dtype. `inv` follows `users`, `row_*` follow `scores`; force
+        # all three onto the accumulator's device/dtype so a device_map-placed
+        # head (fp32, possibly off the batch device) can't break the scatter.
+        acc_device, acc_dtype = scores.device, scores.dtype
+        inv = inv.to(acc_device)
+        user_loss_sum = torch.zeros(n_users, dtype=acc_dtype, device=acc_device)
+        user_pair_count = torch.zeros(n_users, dtype=acc_dtype, device=acc_device)
+        user_loss_sum.scatter_add_(0, inv, row_loss_sum.to(device=acc_device, dtype=acc_dtype))
+        user_pair_count.scatter_add_(0, inv, row_pair_count.to(device=acc_device, dtype=acc_dtype))
+
+        has_pairs = user_pair_count > 0
+        per_user_mean = user_loss_sum[has_pairs] / user_pair_count[has_pairs]
+        return per_user_mean.mean()
+
+    def calculate_recommendation_loss(self, outputs, label_tokens, batch_data, ans_map, cf_emb=None):
         pos_id = self.llm_tokenizer(ans_map[1], add_special_tokens=False).input_ids[0]
         neg_id = self.llm_tokenizer(ans_map[0], add_special_tokens=False).input_ids[0]
         label_seq_len = label_tokens.input_ids.shape[-1]
-        
+
         prediction_logits = outputs.logits[:, -(label_seq_len + 1), :]
         binary_logits = torch.stack(
             [prediction_logits[:, neg_id], prediction_logits[:, pos_id]],
             dim=1,
         )
         labels = batch_data['label'].long()
-        
+
         loss = nn.functional.cross_entropy(binary_logits, labels)
-        
+
+        # uAUC-aligned auxiliary term (opt-in, training only). Disabled by
+        # default so this is bit-for-bit the original BCE unless
+        # ranking_loss_weight > 0. Skipped at eval so val_loss stays comparable
+        # to the BCE baseline (eval batches aren't user-grouped anyway).
+        if self.training and self.ranking_loss_weight > 0.0 and 'UserID' in batch_data:
+            margin = binary_logits[:, 1] - binary_logits[:, 0]   # score s = logit(Yes) - logit(No)
+            bpr = self._per_user_pairwise_loss(margin, batch_data['UserID'], labels)
+            loss = loss + self.ranking_loss_weight * bpr
+
+        # Rank-preserving ALIGNMENT term (opt-in, training only). Reads a scalar
+        # off the aligned CF soft tokens (cf_emb: [B, Q, H], pooled over queries)
+        # and imposes the SAME per-user BPR on THEM — so the collaborative
+        # alignment itself, not just the LLM's Yes/No verdict, is pushed to
+        # preserve within-user ordering. Targets uAUC at the alignment level.
+        # fp32 score keeps the ranking tie-free; needs a user-grouped sampler.
+        # Only at Step 2 (CIE): that is where the Q-Former + projection (the
+        # alignment) are trainable.
+        if (self.training and self.tuning_step == 2
+                and self.align_rank_loss_weight > 0.0
+                and self.align_rank_head is not None and cf_emb is not None
+                and 'UserID' in batch_data):
+            pooled = cf_emb.mean(dim=1).float()                       # [B, Q, H] -> [B, H]
+            align_score = self.align_rank_head(pooled).squeeze(-1)    # [B]
+            align_bpr = self._per_user_pairwise_loss(
+                align_score, batch_data['UserID'], labels,
+                tau=self.align_rank_loss_tau,
+            )
+            loss = loss + self.align_rank_loss_weight * align_bpr
+
         return loss
 
     def recommendation_scores(self, outputs, label_tokens, ans_map):
@@ -931,11 +1067,16 @@ class QRecLLM(Rec2Base):
             )
 
         llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
-        return llm_embeds, llm_atts
+        # Expose the aligned target-item CF soft tokens ([B, Q, H] or None) so the
+        # rank-preserving alignment loss can read a per-user score off them.
+        cf_emb = rec_embeds.get("TargetItem_emb")
+        return llm_embeds, llm_atts, cf_emb
 
     def generate_for_samples(self, samples, return_all=False):
         prompt = self.prompt_list[0]
-        input_embeds, input_atts = self.build_llm_inputs_from_prompt_v2(prompt, samples)
+        # cf_emb unused at eval: the align loss is gated on self.training, so
+        # eval loss stays pure BCE and comparable to the baseline.
+        input_embeds, input_atts, _ = self.build_llm_inputs_from_prompt_v2(prompt, samples)
         label_embeds, label_tokens, ans_map = self.build_llm_outputs_from_labels(samples)
 
         full_embeds, full_atts = self.assemble_llm_sequences(
@@ -996,17 +1137,17 @@ class QRecLLM(Rec2Base):
 
     def forward_v2(self, batch_data):
         prompt = self._sample_prompt()
-        input_embeds, input_atts = self.build_llm_inputs_from_prompt_v2(prompt, batch_data)
+        input_embeds, input_atts, cf_emb = self.build_llm_inputs_from_prompt_v2(prompt, batch_data)
         label_embeds, label_tokens, ans_map = self.build_llm_outputs_from_labels(batch_data)
 
         full_embeds, full_atts = self.assemble_llm_sequences(
             input_embeds, input_atts, label_embeds, label_tokens.attention_mask
         )
-        
+
         targets = self.prepare_llm_targets(input_atts, label_tokens)
-        
+
         outputs = self.execute_llm_forward(full_embeds, full_atts, targets)
-        loss = self.calculate_recommendation_loss(outputs, label_tokens, batch_data, ans_map)
+        loss = self.calculate_recommendation_loss(outputs, label_tokens, batch_data, ans_map, cf_emb=cf_emb)
 
         return {"loss": loss}
 
@@ -1049,6 +1190,13 @@ class QRecLLM(Rec2Base):
         lora_dropout = float(lora_cfg.get("dropout", 0.05))
         tuning_step = cfg.get("tuning_step", None)
 
+        ranking_cfg = cfg.get("ranking_loss") or {}
+        ranking_loss_weight = float(ranking_cfg.get("weight", 0.0))
+        ranking_loss_tau = float(ranking_cfg.get("tau", 1.0))
+        align_rank_cfg = cfg.get("align_rank_loss") or {}
+        align_rank_loss_weight = float(align_rank_cfg.get("weight", 0.0))
+        align_rank_loss_tau = float(align_rank_cfg.get("tau", 1.0))
+
         model = cls(
             rec_model=rec_model,
             rec_config=rec_config,
@@ -1078,6 +1226,10 @@ class QRecLLM(Rec2Base):
             lora_dropout=lora_dropout,
             tuning_step=tuning_step,
             user_conditioned=user_conditioned,
+            ranking_loss_weight=ranking_loss_weight,
+            ranking_loss_tau=ranking_loss_tau,
+            align_rank_loss_weight=align_rank_loss_weight,
+            align_rank_loss_tau=align_rank_loss_tau,
         )
 
         ckpt_path = cfg.get("ckpt", "")
