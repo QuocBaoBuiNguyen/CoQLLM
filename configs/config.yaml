@@ -59,7 +59,7 @@ model:
   # noise; this loss makes the shift earn within-user discrimination instead.
   # Gated to Step 2 (where Q-Former/proj are trainable). weight=0.0 -> disabled.
   align_rank_loss:
-    weight: 0.0
+    weight: 0.2
     tau: 1.0
 
   proj_token_num: ${model.qformer_config.num_queries}
@@ -208,7 +208,7 @@ run:
     # `qformer_stage3_step1`: only the keys that differ from the top-level
     # defaults are listed here.
     prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie.txt"
-    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_cie_qwen2/"
+    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_run2_alignloss_qwen2/"
     ckpt: "${run.qformer_stage3_step1.output_dir}${run.qformer_stage3_step1.best_ckpt_name}"
     init_lr: 3e-5
     # Must stay below init_lr: the top-level min_lr (8e-5) is ABOVE this stage's
@@ -241,7 +241,7 @@ run:
   # enabled=false -> original random/distributed sampling (no behavior change).
   # Only affects map-style rec datasets (Stage 3); Stage 1/2 use their own loader.
   user_grouped_batch:
-    enabled: false
+    enabled: true
     items_per_user: 8
     seed: 0
 
