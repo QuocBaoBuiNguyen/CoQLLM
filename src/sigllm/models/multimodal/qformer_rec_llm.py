@@ -1007,7 +1007,17 @@ class QRecLLM(Rec2Base):
         neg_id = self.llm_tokenizer(ans_map[0], add_special_tokens=False).input_ids[0]
         label_seq_len = label_tokens.input_ids.shape[-1]
 
-        prediction_logits = outputs.logits[:, -(label_seq_len + 1), :]
+        # Upcast to fp32 BEFORE the softmax. The LLM runs in fp16 (torch_dtype=
+        # float16), and a fp16 softmax SATURATES: the largest fp16 below 1.0 is
+        # ~0.99951, so any P(Yes) with a Yes-No logit margin > ~7.6 rounds to
+        # exactly 1.0 (and its complement to 0.0). All confident predictions then
+        # tie at 1.0/0.0. roc_auc_score scores ties as 0.5, so per-user AUC gets
+        # dragged toward 0.5 (each user has few items -> a few ties dominate) and
+        # uAUC collapses, while global AUC survives on cross-user spread — the
+        # "uAUC low but AUC okay" signature. fp32 keeps ranks distinct up to
+        # margin ~16. Ranking-only change; the >0.5 ACC/pred_pos_rate threshold
+        # is preserved (0.5 is exact in both dtypes).
+        prediction_logits = outputs.logits[:, -(label_seq_len + 1), :].float()
         binary_logits = torch.stack(
             [prediction_logits[:, neg_id], prediction_logits[:, pos_id]],
             dim=1,
