@@ -35,11 +35,34 @@ class MovieOODDataset(RecBaseDataset):
 		df = pd.read_pickle(ann_path.with_suffix(".pkl")).reset_index(drop=True)
 		self.annotation = df.copy()
 
+		# SeLLa-matched warm/cold partition (BUG 2, Mismatch 1). SeLLa
+		# (prepare_finetune_data.py:142) partitions the WHOLE test set by a single
+		# `not_cold` flag: warm = not_cold==1, cold = not_cold==0. The old code
+		# used a separate, stricter `warm` column (user AND item each with >3 train
+		# interactions), a smaller/different population that is NOT comparable to
+		# SeLLa's Table 3 warm. Use not_cold for both so the split matches SeLLa.
 		if subset == "warm":
-			self.annotation = df[df['warm'].isin([1])].copy()
+			self.annotation = df[df['not_cold'].isin([1])].copy()
 
 		if subset == "cold":
 			self.annotation = df[df['not_cold'].isin([0])].copy()
+
+		# SeLLa-matched no-history drop (BUG 2, Mismatch 2). SeLLa
+		# (prepare_finetune_data.py:50 `if len(his_non)<2: continue`) drops every
+		# row with fewer than 2 history entries, in EVERY split. In the ood2 format
+		# `his` starts as [0] and grows only on positive interactions, so len(his)<2
+		# means the user has no positive history yet. SigLLM previously kept these
+		# and padded to zeros — evaluating the hardest cold-start rows SeLLa never
+		# sees, which unfairly depressed overall/cold AUC/uAUC. Drop them to match.
+		if 'his' in self.annotation.columns:
+			_before = len(self.annotation)
+			self.annotation = self.annotation[
+				self.annotation['his'].map(lambda h: len(h) >= 2)
+			].reset_index(drop=True)
+			log_step(
+				"SeLLa his>=2 filter",
+				f"subset={subset}: {_before} -> {len(self.annotation)} rows",
+			)
 
 		self.use_his = False
 		self.prompt_flag = False
