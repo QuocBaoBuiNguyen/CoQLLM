@@ -889,6 +889,15 @@ class QRecLLM(Rec2Base):
             return
         H = int(self.llm_model.config.hidden_size)
         self.align_rank_head = nn.Linear(H, 1)
+        # Zero-init so align_score == 0 at step 0 -> the per-user BPR is a flat
+        # constant with ZERO gradient into the Q-Former/projection, i.e. the loss
+        # is a no-op at warm-start and only ramps up as the head learns (same
+        # safeguard as user_proj). Without this the random-init head immediately
+        # perturbs the warm-started Q-Former and can collapse Step-2 to chance in
+        # the first epoch (observed: val uAUC 0.53 / AUC 0.50 at epoch 0 before it
+        # recovered) — a needless, destabilising jolt.
+        nn.init.zeros_(self.align_rank_head.weight)
+        nn.init.zeros_(self.align_rank_head.bias)
         log_step(
             "Rank-preserving alignment loss ACTIVE",
             f"aux per-user BPR on the aligned CF tokens "
