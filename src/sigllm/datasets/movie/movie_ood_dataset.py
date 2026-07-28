@@ -47,20 +47,23 @@ class MovieOODDataset(RecBaseDataset):
 		if subset == "cold":
 			self.annotation = df[df['not_cold'].isin([0])].copy()
 
-		# SeLLa-matched no-history drop (BUG 2, Mismatch 2). SeLLa
-		# (prepare_finetune_data.py:50 `if len(his_non)<2: continue`) drops every
-		# row with fewer than 2 history entries, in EVERY split. In the ood2 format
-		# `his` starts as [0] and grows only on positive interactions, so len(his)<2
-		# means the user has no positive history yet. SigLLM previously kept these
-		# and padded to zeros — evaluating the hardest cold-start rows SeLLa never
-		# sees, which unfairly depressed overall/cold AUC/uAUC. Drop them to match.
-		if 'his' in self.annotation.columns:
+		# SeLLa-matched no-history drop (BUG 2, Mismatch 2). Ported EXACTLY from
+		# SeLLa codes/step3_train_sella/prepare_finetune_data.py:47-51:
+		#     his_non = [t.replace('\n','').replace('\r','') for t in his_title]
+		#     if len(his_non) < 2: continue
+		# i.e. the filter is on `his_title` (the history-TITLE list, len == his_title
+		# length), NOT the id list `his`. SeLLa applies it in write_in_file, which
+		# runs for EVERY split (train/valid/test/warm/cold). Rows with <2 history
+		# titles (no real positive history) are the hardest cold-start rows; SigLLM
+		# previously kept and zero-padded them, unfairly depressing overall/cold
+		# AUC/uAUC. Drop them here to match SeLLa's Table 3 population exactly.
+		if 'his_title' in self.annotation.columns:
 			_before = len(self.annotation)
 			self.annotation = self.annotation[
-				self.annotation['his'].map(lambda h: len(h) >= 2)
+				self.annotation['his_title'].map(lambda t: len(t) >= 2)
 			].reset_index(drop=True)
 			log_step(
-				"SeLLa his>=2 filter",
+				"SeLLa his_title>=2 filter",
 				f"subset={subset}: {_before} -> {len(self.annotation)} rows",
 			)
 
