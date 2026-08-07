@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import torch
@@ -64,5 +65,16 @@ def smoke_test_model(model_dir, prompt="Q: What is the largest animal?\nA:", max
     print(tokenizer.decode(generation_output[0], skip_special_tokens=True))
 
 if __name__ == "__main__":
-    saved_dir = pull_model()
-    smoke_test_model(saved_dir)
+    # Default = Vicuna-7B-v1.5 to match the active CoLLM-comparison config
+    # (model.llm_model: .../ckpt/llm/vicuna-7b-v1.5). Run from the repo root so
+    # ./ckpt resolves to /content/SigLLM/ckpt. To pull the Qwen base instead:
+    #   python pull_llm_model.py --model-path Qwen/Qwen2-7B --save-dir ./ckpt/llm/qwen2-7b-base
+    parser = argparse.ArgumentParser(description="Download an HF causal LM + tokenizer in fp16.")
+    parser.add_argument("--model-path", default="lmsys/vicuna-7b-v1.5", help="HF repo id to pull.")
+    parser.add_argument("--save-dir", default="./ckpt/llm/vicuna-7b-v1.5", help="Local dir to save into (must match model.llm_model in the config).")
+    parser.add_argument("--skip-smoke-test", action="store_true", help="Skip the post-download generation check.")
+    args = parser.parse_args()
+
+    saved_dir = pull_model(model_path=args.model_path, save_dir=args.save_dir)
+    if not args.skip_smoke_test:
+        smoke_test_model(saved_dir)
