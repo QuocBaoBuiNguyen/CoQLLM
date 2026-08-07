@@ -246,12 +246,13 @@ class QRecLLM(Rec2Base):
 
     def _resolve_soft_token_placeholder(self):
         tok = self.llm_tokenizer
-        if tok.unk_token_id is not None:
-            self._soft_token_str = tok.unk_token
-            self._soft_token_id = tok.unk_token_id
-            return
-
-        skip_ids = {tok.eos_token_id, tok.pad_token_id, tok.bos_token_id}
+        # NB: do NOT use <unk> as the soft-slot placeholder even when it exists.
+        # LLaMA/Vicuna emit <unk> (id 0) for ANY out-of-vocab char in the prompt
+        # TEXT (accented movie/book titles etc.), so `input_ids == unk_id` would
+        # also match those organic unks — inflating the soft-slot count and
+        # breaking the merged_embs scatter (shape mismatch [2046] vs [1240]).
+        # unk is therefore added to skip_ids and never selected below.
+        skip_ids = {tok.eos_token_id, tok.pad_token_id, tok.bos_token_id, tok.unk_token_id}
         skip_ids.discard(None)
 
         hardcoded = (
@@ -281,14 +282,23 @@ class QRecLLM(Rec2Base):
                 self._soft_token_id = token_id
                 return
 
+        # No reserved single-token placeholder exists (e.g. LLaMA/Vicuna, whose
+        # only spare special is the unsafe <unk>). Add a dedicated reserved token
+        # that can never appear in natural text and grow the embedding table by
+        # one row. The new row's value is irrelevant — it is always overwritten
+        # by the projected CF embedding at injection time; it is never a label
+        # target either, so the frozen/LoRA LLM is unaffected. Runs before LoRA
+        # is attached (see _init_llm_model order), so resize hits the raw model.
+        soft_tok = "<rec_soft_token>"
+        self.llm_tokenizer.add_special_tokens({"additional_special_tokens": [soft_tok]})
+        self.llm_model.resize_token_embeddings(len(self.llm_tokenizer))
+        self._soft_token_str = soft_tok
+        self._soft_token_id = self.llm_tokenizer.convert_tokens_to_ids(soft_tok)
         log_step(
-            "Soft-token fallback",
-            "no unk_token and no safe single-token candidate; using eos_token "
-            "as soft-slot placeholder. Soft slots will COLLIDE with padding if "
-            "pad_token == eos_token — Step 2 may corrupt embeddings silently.",
+            "Soft-token placeholder added",
+            f"{soft_tok} -> id {self._soft_token_id}; embeddings resized to "
+            f"{len(self.llm_tokenizer)} (dedicated slot, cannot collide with text).",
         )
-        self._soft_token_str = tok.eos_token
-        self._soft_token_id = tok.eos_token_id
 
     def _attach_lora(self):
         from peft import LoraConfig, TaskType, get_peft_model
