@@ -190,16 +190,18 @@ run:
     qformer_ckpt_out: "qformer_stage2_best_qformer.pth"
     proj_ckpt_out: "qformer_stage2_best_proj.pth"
     output_dir: "/content/SigLLM/ckpt/qformer_stage2_vicuna/"
-    lr: 1e-4
-    weight_decay: 1e-3
-    # 20 -> 40: at epoch 20 the Vicuna Stage-2 val_loss was STILL dropping
-    # (best fell on the last epoch, 0.6016) — the projection warm-start was
-    # under-trained, which shows up as a weak Step-2 score_gap. Give it room;
-    # early_stopping_patience=5 stops it early if it truly plateaus first.
-    epoch: 40
+    # Winning Vicuna Stage-2 recipe (baked in from the --options sweep):
+    #   lr 1e-4 -> 2e-4 + wd 1e-3 -> 1e-4 converged MUCH faster and lower
+    #   (val_loss 0.6016@ep20 old -> 0.5426@ep39), no instability. Still dropping
+    #   at the 40 cap, so raise to 80; patience=8 stops it once it truly plateaus.
+    # NB: Stage-2 does NOT resume — re-running restarts from the Stage-1 ckpt and
+    #   redoes every epoch (~38s/epoch, so 80 ep ~= 51 min).
+    lr: 2e-4
+    weight_decay: 1e-4
+    epoch: 80
     log_epoch: 1
     max_caption_length: 64
-    early_stopping_patience: 5
+    early_stopping_patience: 8
     early_stopping_min_delta: 1e-4
 
   qformer_stage3_step1:
