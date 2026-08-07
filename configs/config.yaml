@@ -192,7 +192,11 @@ run:
     output_dir: "/content/SigLLM/ckpt/qformer_stage2_vicuna/"
     lr: 1e-4
     weight_decay: 1e-3
-    epoch: 20
+    # 20 -> 40: at epoch 20 the Vicuna Stage-2 val_loss was STILL dropping
+    # (best fell on the last epoch, 0.6016) — the projection warm-start was
+    # under-trained, which shows up as a weak Step-2 score_gap. Give it room;
+    # early_stopping_patience=5 stops it early if it truly plateaus first.
+    epoch: 40
     log_epoch: 1
     max_caption_length: 64
     early_stopping_patience: 5
