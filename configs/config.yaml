@@ -101,6 +101,11 @@ datasets:
     data_type: default
     build_info:
       storage: "/content/SigLLM/data/processed/ml-1m/"
+      # CoLLM parity: CoLLM keeps ALL rows and zero-pads short histories (it does
+      # NOT drop <2-history rows the way SeLLa does). Set False here so our test
+      # population matches CoLLM's Table numbers. Flip to True to reproduce
+      # SeLLa's easier (cold-start-dropped) population instead.
+      match_sella_history_filter: false
 
 run:
   task: rec_pretrain

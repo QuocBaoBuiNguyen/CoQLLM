@@ -47,17 +47,21 @@ class MovieOODDataset(RecBaseDataset):
 		if subset == "cold":
 			self.annotation = df[df['not_cold'].isin([0])].copy()
 
-		# SeLLa-matched no-history drop (BUG 2, Mismatch 2). Ported EXACTLY from
-		# SeLLa codes/step3_train_sella/prepare_finetune_data.py:47-51:
-		#     his_non = [t.replace('\n','').replace('\r','') for t in his_title]
-		#     if len(his_non) < 2: continue
-		# i.e. the filter is on `his_title` (the history-TITLE list, len == his_title
-		# length), NOT the id list `his`. SeLLa applies it in write_in_file, which
-		# runs for EVERY split (train/valid/test/warm/cold). Rows with <2 history
-		# titles (no real positive history) are the hardest cold-start rows; SigLLM
-		# previously kept and zero-padded them, unfairly depressing overall/cold
-		# AUC/uAUC. Drop them here to match SeLLa's Table 3 population exactly.
-		if 'his_title' in self.annotation.columns:
+		# no-history-drop policy — TOGGLEABLE to match either reference:
+		#   * SeLLa (codes/step3_train_sella/prepare_finetune_data.py:47-51) DROPS
+		#     rows whose his_title has <2 entries, on EVERY split. Easier population.
+		#   * CoLLM (minigpt4/datasets/datasets/rec_datasets.py:49,82-83) does NOT
+		#     drop anything — it KEEPS all rows and zero-pads short histories.
+		# The two references therefore evaluate on DIFFERENT test populations, so
+		# our numbers are only comparable to whichever we mirror. Gate on
+		# build_info.match_sella_history_filter (default True = SeLLa; set False in
+		# the config to reproduce CoLLM's Table numbers on the full population).
+		match_sella_history_filter = bool(
+			getattr(dataset_config.build_info, "get", lambda *a: True)(
+				"match_sella_history_filter", True
+			)
+		)
+		if match_sella_history_filter and 'his_title' in self.annotation.columns:
 			_before = len(self.annotation)
 			self.annotation = self.annotation[
 				self.annotation['his_title'].map(lambda t: len(t) >= 2)
@@ -65,6 +69,11 @@ class MovieOODDataset(RecBaseDataset):
 			log_step(
 				"SeLLa his_title>=2 filter",
 				f"subset={subset}: {_before} -> {len(self.annotation)} rows",
+			)
+		elif 'his_title' in self.annotation.columns:
+			log_step(
+				"CoLLM-parity: his_title>=2 filter DISABLED",
+				f"subset={subset}: keeping all {len(self.annotation)} rows (zero-pad short history)",
 			)
 
 		self.use_his = False
