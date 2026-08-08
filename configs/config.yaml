@@ -82,7 +82,12 @@ model:
     num_queries: 8
     num_heads: 8
     num_layers: 4
-    user_conditioned: False
+    # AUC lever: the additive user query-shift VARIES across users (buffs global
+    # AUC) but is CONSTANT within a user (cancels in uAUC — uAUC-neutral by
+    # construction). This is what pushed the Qwen "user-conditioned queries" run
+    # to AUC ~0.75 while vanilla (False) sat at ~0.73 but max uAUC. Stage-2 does
+    # NOT read user_cf, so only Step-2 needs retraining to adopt this.
+    user_conditioned: True
 
   rec_config:
     user_num: 839
@@ -222,7 +227,7 @@ run:
     # `qformer_stage3_step1`: only the keys that differ from the top-level
     # defaults are listed here.
     prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie.txt"
-    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_vanilla_vicuna/"
+    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_ucq_vicuna/"
     ckpt: "${run.qformer_stage3_step1.output_dir}${run.qformer_stage3_step1.best_ckpt_name}"
     init_lr: 3e-5
     # Must stay below init_lr: the top-level min_lr (8e-5) is ABOVE this stage's
