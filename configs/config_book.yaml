@@ -215,9 +215,13 @@ run:
     qformer_ckpt_out: "qformer_stage2_best_qformer.pth"
     proj_ckpt_out: "qformer_stage2_best_proj.pth"
     output_dir: "/content/SigLLM/ckpt/qformer_stage2_book_vicuna/"
-    lr: 1e-4
+    # lr 1e-4 -> 2e-4 (faster convergence, per the movie winning recipe) and
+    # epoch 20 -> 30. Book Stage-2 is expensive (34k items) so we do NOT push to
+    # movie's 80 (Stage-2 depth was shown not to lift downstream). wd + patience
+    # kept at book values as requested.
+    lr: 2e-4
     weight_decay: 1e-3
-    epoch: 20
+    epoch: 30
     log_epoch: 1
     max_caption_length: 64
     early_stopping_patience: 5
