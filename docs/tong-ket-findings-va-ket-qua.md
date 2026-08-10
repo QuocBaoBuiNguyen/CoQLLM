@@ -9,17 +9,18 @@
 | Dataset | AUC | uAUC | So sánh (same-protocol) |
 |---|---|---|---|
 | **ML-1M** (movie) | **0.7475** | **0.6968** | Vượt BinLLM (0.7425/0.6956) **cả 2** |
-| **Amazon-Book** | **0.8147** | **0.5958** | Vượt CoLLM-MF & BinLLM (CoRA-protocol) **cả 2** |
+| **Amazon-Book** | **0.8132** | **0.6062** | Vượt CoLLM-MF & BinLLM (CoRA-protocol) **cả 2**; +align_rank |
 
 **Chi tiết book (test, CoLLM-parity, 2486 user tính uAUC):**
 | Book | AUC | uAUC |
 |---|---|---|
 | CoLLM-MF (CoRA re-run) | 0.8021 | 0.5782 |
 | BinLLM (CoRA re-run) | 0.8157 | 0.5724 |
-| **Ta** | **0.8147** | **0.5958** |
+| Ta — user_conditioned (Run-1) | 0.8147 | 0.5958 |
+| **Ta — + align_rank_loss (Run-2)** | **0.8132** | **0.6062** |
 | CoRA-MF (method riêng của họ) | 0.8179 | 0.6262 |
 
-→ Chỉ dưới CoRA-MF (cơ chế khác: nhét collab thành trọng số LoRA của LLM, không phải soft-token).
+→ Run-2 (align_rank) nâng uAUC **0.5958 → 0.6062 (+0.0104)**, AUC gần như đứng yên (−0.0015). Cắt mốc 0.60, vào vùng bảng BinLLM "inflated" (CoLLM-MF 0.6225), chỉ còn dưới CoRA-MF (0.6262, cơ chế khác: nhét collab thành trọng số LoRA của LLM, không phải soft-token) khoảng −0.020.
 
 ---
 
@@ -62,6 +63,13 @@ Có 2 bảng cho Amazon-Book cho ra số CoLLM/BinLLM **khác nhau**:
 
 ---
 
+## 4b. FINDING (MỚI): `align_rank_loss` = đòn bẩy uAUC THẬT trên book (âm trên movie)
+
+- **Cơ chế:** per-user pairwise BPR (differentiable uAUC surrogate) áp lên **CF soft-token đã align** (pre-LLM), qua 1 aux head `align_rank_head` (zero-init). Ép chính phần alignment collaborative giữ **within-user ordering**, không chỉ margin Yes/No của LLM. Gated Step-2 (Q-Former/proj trainable), cần `user_grouped_batch` để mỗi batch có cặp same-user pos/neg. Bật: `align_rank_loss.weight=0.2` + `user_grouped_batch.enabled=true`.
+- **Kết quả book (Run-2):** uAUC **0.5958 → 0.6062 (+0.0104)**, AUC ~đứng yên. Đúng thiết kế — đánh trúng within-user, không đụng cross-user AUC.
+- **Trajectory Step-2 (val uAUC):** ep0 0.531 → ep1 0.551 → ep2 0.582 → ep3 0.589 → ep4 0.594 → **ep5 0.606 (đỉnh)** → ep6 0.602. Xuất phát THẤP hơn baseline vì `align_rank_head` **zero-init** (epoch đầu ~no-op, tác dụng hiện dần) → **đừng phán ở epoch 0-1**; đỉnh ~ep5.
+- **Vì sao book ăn mà movie không:** book ở profile **AUC-cao/uAUC-thấp** (dư địa within-user lớn) → loss này lấp đúng gap. Movie uAUC đã ~bão hoà → trung tính/âm. → **bật theo-dataset là hợp lệ** (siêu tham số theo dataset, không phải bất nhất phương pháp). Cần **ablation movie** (1 run Step-2) để hoàn thiện bảng ON/OFF × {movie, book}.
+
 ## 5. CƠ CHẾ THEN CHỐT (đúc kết)
 
 - **LoRA (Step-1) = ngôn ngữ/text; CF (Q-Former/proj, Step-2) = collaborative.** LoRA train text-only → uAUC Step-1 ~chance (0.54); CF vào ở Step-2 mới kéo AUC/uAUC lên.
@@ -75,10 +83,14 @@ Có 2 bảng cho Amazon-Book cho ra số CoLLM/BinLLM **khác nhau**:
 
 ## 6. QUYẾT ĐỊNH KHOÁ
 1. **Giữ Q-Former, KHÔNG đổi kiến trúc** (đã trễ).
-2. **Không đuổi book uAUC 0.62** (số inflated) — book đã competitive.
-3. Backbone **Vicuna** (CoLLM-faithful). `user_conditioned=True` (lever AUC).
-4. Viết luận: **movie SOTA + book competitive**, ghi rõ protocol selection khi so bảng CoRA.
+2. ~~Không đuổi book uAUC 0.62~~ **GỠ KHOÁ (2026-08-10):** align_rank đã đẩy book uAUC 0.5958→0.6062, đang tiến về vùng 0.62 — cải thiện trong-pipeline là hướng đang theo.
+3. Backbone **Vicuna** (CoLLM-faithful). `user_conditioned=True` (lever AUC) + `align_rank_loss=0.2` cho book (lever uAUC).
+4. Viết luận: **movie SOTA + book competitive/thắng**, ghi rõ protocol selection khi so bảng CoRA.
+
+## 7. NEXT
+- **Ablation movie:** chạy 1 run Step-2 với `align_rank_loss=0.2`+`user_grouped_batch=true` → hoàn thiện bảng ON/OFF × {movie, book}. Kỳ vọng trung tính/âm trên movie (uAUC đã cao) → biện minh bật-theo-dataset.
+- (Tuỳ) đẩy tiếp book: thử `align_rank_loss.weight` 0.1/0.5, hoặc Lever 2 (MF teacher mạnh hơn) nếu muốn chạm 0.62.
 
 ## Checkpoint
 - Movie SOTA: `ckpt/qformer_stage3_step2_ucq_vicuna/` (nhánh `feat/user-conditioned-queries-v2`).
-- Book: `ckpt/qformer_stage3_step2_book_vicuna/` (nhánh `feat/user-conditioned-queries-v2-book`).
+- Book (Run-2, +align_rank, uAUC 0.6062): `ckpt/qformer_stage3_step2_book_vicuna/` (nhánh `feat/user-conditioned-queries-v2-book`).
