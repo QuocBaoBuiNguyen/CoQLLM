@@ -32,11 +32,11 @@ Có 2 bảng cho Amazon-Book cho ra số CoLLM/BinLLM **khác nhau**:
 | BinLLM | 0.6319 | **0.5724** |
 | MF teacher | 0.5565 | 0.5543 (~giống) |
 
-**Nguyên nhân (CoRA.pdf, "Hyperparameter Settings"):** CoRA chạy lại toàn bộ baseline, **chọn checkpoint + early-stop theo AUC** (không theo uAUC). Vì AUC↔uAUC là frontier đánh đổi → chọn theo AUC làm **uAUC báo cáo thấp đi**. Bài gốc BinLLM/CoLLM report uAUC ở epoch tối-ưu-uAUC → cao hơn. MF (không có selection ambiguity) gần như không đổi → xác nhận đây là **artifact protocol selection**, không phải data.
+**Nguyên nhân (ĐÃ ĐÍNH CHÍNH sau khi đọc code CoLLM):** KHÔNG phải do selection metric. Confirm từ source: CoLLM `minigpt4/tasks/rec_base_task.py:254` → `agg_metrics = auc` + runner chọn best theo AUC; CoRA cũng chọn theo AUC. **Cả hai đều chọn theo AUC.** Chênh lệch giữa 2 bảng (CoLLM-MF uAUC 0.6225 vs 0.5782) là do **variance khi mỗi bài RE-RUN/RE-IMPLEMENT CoLLM** (tuning khác nhau; uAUC book nhiễu ~2500 user → lệch ±0.03-0.05). **Không có 1 con số CoLLM "đúng" duy nhất** — nó ~0.57-0.62 tuỳ run. Book của ta (0.5958) nằm gọn trong dải đó.
 
-→ **Hệ quả:** mốc "book uAUC 0.62+" ta từng lo là ảo. So đúng protocol (CoRA), book của ta **vượt** CoLLM/BinLLM. **KHÔNG cần đuổi 0.62, không cần đổi teacher/kiến trúc.**
+→ **Hệ quả:** mốc "book uAUC 0.62+" không phải mục tiêu cố định — book của ta đã trong dải cạnh tranh. **KHÔNG cần đuổi 0.62, không cần đổi teacher/kiến trúc.**
 
-⚠️ Lưu ý báo cáo: **ta chọn ckpt theo uAUC** (`best_metric=uauc` hardcode), CoRA theo AUC. Khi đặt cạnh bảng CoRA phải ghi rõ protocol (hoặc report thêm số AUC-selected) để so 1:1.
+⚠️ **Khác biệt protocol THẬT giữa TA và HỌ:** ta chọn ckpt theo **uAUC** (`rec_base_task.py:201`), CoLLM/CoRA theo **AUC**. → uAUC của ta là uAUC-optimal (lợi thế nhẹ). Khi đặt cạnh bảng, ghi rõ điều này (hoặc report thêm số AUC-selected) để so 1:1.
 
 ---
 
