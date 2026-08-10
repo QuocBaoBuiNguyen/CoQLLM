@@ -22,6 +22,15 @@
 
 → Run-2 (align_rank) nâng uAUC **0.5958 → 0.6062 (+0.0104)**, AUC gần như đứng yên (−0.0015). Cắt mốc 0.60, vào vùng bảng BinLLM "inflated" (CoLLM-MF 0.6225), chỉ còn dưới CoRA-MF (0.6262, cơ chế khác: nhét collab thành trọng số LoRA của LLM, không phải soft-token) khoảng −0.020.
 
+**Phân rã warm/cold (Run-2, test):**
+| Split | #user | AUC | uAUC |
+|---|---|---|---|
+| test (full) | 2486 | 0.8132 | 0.6062 |
+| test_warm | 1648 | **0.8190** | **0.6238** |
+| test_cold | 630 | 0.7928 | **0.5258** |
+
+→ **Bằng chứng trực tiếp uAUC = bài toán CF:** warm uAUC **0.624** (có tín hiệu MF, gần chạm CoRA-MF 0.6262) vs cold uAUC **0.526** (≈ chance — MF frozen không có embedding cho user/item cold). Cold kéo trung bình full xuống 0.606. Trần uAUC nằm ở **cold-item / MF teacher**, đúng finding Stage-1 (val OOD/cold cap) và chẩn đoán AUC-cao/uAUC-thấp — KHÔNG phải Q-Former. → nếu muốn đẩy uAUC full cao hơn nữa, đòn bẩy là **MF teacher trên cold** (Lever 2), không phải regularize/kiến trúc.
+
 ---
 
 ## 2. FINDING: Số uAUC book của CoLLM/BinLLM trong bài BinLLM bị **INFLATED**
