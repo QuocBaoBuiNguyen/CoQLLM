@@ -253,6 +253,11 @@ run:
     best_ckpt_name: "checkpoint_best.pth"
     init_lr: 2e-4
     max_epoch: 5
+    # Step-1 is text-only (no CF) so valid AUC/uAUC is ~chance and per-epoch eval
+    # is wasted LLM-generation time. skip_eval trains straight through (no eval,
+    # ~2x faster); the driver promotes the final-epoch checkpoint to best_ckpt_name
+    # so Step-2 still loads it. Set false to restore per-epoch validation.
+    skip_eval: true
 
   qformer_stage3_step2:
     # CoLLM Step 2 — train Q-Former + projection on the full prompt, LoRA

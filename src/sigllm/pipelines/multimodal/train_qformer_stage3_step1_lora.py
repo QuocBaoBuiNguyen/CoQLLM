@@ -8,8 +8,10 @@ any collaborative-filtering signal. The best checkpoint feeds Step 2.
 """
 
 import argparse
+import glob
 import os
 import random
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -52,6 +54,37 @@ def apply_step1_overrides(cfg):
     cfg.run_cfg.output_dir = step1.output_dir
     cfg.run_cfg.init_lr = step1.init_lr
     cfg.run_cfg.max_epoch = step1.max_epoch
+    # Speed: Step-1 is text-only (no CF), so per-epoch valid AUC/uAUC is ~chance
+    # and best-checkpoint selection is noise. skip_eval clears valid_splits so the
+    # runner trains straight through with no eval (roughly halves wall-clock). We
+    # then promote the final-epoch checkpoint to best_ckpt_name in main() so Step-2
+    # still finds the file it loads.
+    if step1.get("skip_eval", False):
+        cfg.run_cfg.valid_splits = []
+
+
+def promote_final_ckpt_to_best(cfg):
+    """When Step-1 ran with skip_eval (no valid_splits), the runner saved
+    checkpoint_<epoch>.pth each epoch but never checkpoint_best.pth. Copy the
+    highest-epoch checkpoint to best_ckpt_name so Step-2's ckpt path resolves."""
+    step1 = cfg.run_cfg.qformer_stage3_step1
+    out_dir = step1.output_dir
+    ckpts = glob.glob(os.path.join(out_dir, "checkpoint_*.pth"))
+    ckpts = [c for c in ckpts if os.path.basename(c) != step1.best_ckpt_name]
+
+    def _epoch_of(path):
+        stem = os.path.basename(path)[len("checkpoint_"):-len(".pth")]
+        return int(stem) if stem.isdigit() else -1
+
+    numbered = [c for c in ckpts if _epoch_of(c) >= 0]
+    if not numbered:
+        raise FileNotFoundError(
+            f"skip_eval promotion: no checkpoint_<epoch>.pth found in {out_dir}"
+        )
+    final = max(numbered, key=_epoch_of)
+    best = os.path.join(out_dir, step1.best_ckpt_name)
+    shutil.copyfile(final, best)
+    print(f"[step1] skip_eval: promoted {os.path.basename(final)} -> {step1.best_ckpt_name}")
 
 
 @record
@@ -79,6 +112,9 @@ def main():
     model = task.build_model(cfg=cfg)
     runner = task.build_runner(cfg=cfg, job_id=job_id, task=task, model=model, datasets=datasets)
     runner.train()
+
+    if cfg.run_cfg.qformer_stage3_step1.get("skip_eval", False) and get_rank() == 0:
+        promote_final_ckpt_to_best(cfg)
 
 
 if __name__ == "__main__":
