@@ -152,7 +152,10 @@ run:
     # overfit). bs=2048 + lr=2e-4 DIVERGED (ITC@1 stuck ~0.017, L_itc frozen ~4.08):
     # contrastive can't take an 8x-scaled lr. Use bs=1024 (4x negatives, ~4x faster)
     # with the ORIGINAL lr=5e-5 (below) for stability.
-    batch_size: 256
+    # Bumped 256->1024 to use spare VRAM: ~4x fewer steps/epoch (faster wall-clock)
+    # and 4x in-batch negatives (sharper ITC/II/UI). lr stays 5e-5 (2e-4 diverged);
+    # the dropout=0.2 added below covers the extra overfit risk from a bigger batch.
+    batch_size: 1024
     num_workers: 8
     embedding_size: ${model.rec_config.embedding_size}
     user_num: ${model.rec_config.user_num}
