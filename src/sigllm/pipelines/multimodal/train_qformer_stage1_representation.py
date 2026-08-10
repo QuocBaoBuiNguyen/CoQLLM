@@ -81,6 +81,12 @@ def _init_qformer(cfg, d_model, device):
         num_heads=cfg.num_heads,
         num_layers=cfg.num_layers,
         output_dim=int(qformer_output_dim),
+        # Stage-1 regularization: the Q-Former (incl. its BERT text branch) was
+        # previously built with dropout=0.0 (the adapter default), which drove the
+        # book overfit (train ITC@1 0.94 vs val 0.10). Dropout is training-only
+        # (disabled at eval / in Stage-2 / Step-2), so this is pure regularization
+        # with NO architecture change and no effect on downstream inference.
+        dropout=float(cfg.get("dropout", 0.0)),
         qformer_text_model_name=cfg.qformer_text_model_name,
         max_instruction_length=cfg.get("max_instruction_length", 48),
     ).to(device)

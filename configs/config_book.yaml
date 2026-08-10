@@ -180,7 +180,14 @@ run:
     tau_itc: 0.07
     tau_ii: 0.05
     tau_ui: 0.07
-    weight_decay: 1e-3
+    # OVERFIT FIX (book Stage-1 train ITC@1 0.94 vs val 0.10). The Q-Former + its
+    # BERT text branch were trained with dropout=0.0 (adapter default; the script
+    # never passed a dropout) and only wd=1e-3 — near-zero regularization on a
+    # 4-layer/768-d transformer over sparse 34k-item book titles. Two pure-
+    # regularization levers (NO architecture change, both training-only / off at
+    # eval + downstream): enable dropout, and raise weight_decay 1e-3 -> 1e-2.
+    dropout: 0.2
+    weight_decay: 1e-2
     debug_batch: True
     debug_batch_max_steps: 10
     early_stopping_patience: 10
