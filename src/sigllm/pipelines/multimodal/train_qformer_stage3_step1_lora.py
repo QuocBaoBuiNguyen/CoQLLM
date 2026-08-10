@@ -63,14 +63,16 @@ def apply_step1_overrides(cfg):
         cfg.run_cfg.valid_splits = []
 
 
-def promote_final_ckpt_to_best(cfg):
+def promote_final_ckpt_to_best(out_dir, best_ckpt_name):
     """When Step-1 ran with skip_eval (no valid_splits), the runner saved
     checkpoint_<epoch>.pth each epoch but never checkpoint_best.pth. Copy the
-    highest-epoch checkpoint to best_ckpt_name so Step-2's ckpt path resolves."""
-    step1 = cfg.run_cfg.qformer_stage3_step1
-    out_dir = step1.output_dir
+    highest-epoch checkpoint to best_ckpt_name so Step-2's ckpt path resolves.
+
+    `out_dir` must be the runner's actual save dir (run_cfg.output_dir/<job_id>,
+    e.g. .../vicuna-7b-v1.5/) -- Step-2 loads os.path.join(step1_out, slug,
+    best_ckpt_name), so the file has to live in the job_id subfolder."""
     ckpts = glob.glob(os.path.join(out_dir, "checkpoint_*.pth"))
-    ckpts = [c for c in ckpts if os.path.basename(c) != step1.best_ckpt_name]
+    ckpts = [c for c in ckpts if os.path.basename(c) != best_ckpt_name]
 
     def _epoch_of(path):
         stem = os.path.basename(path)[len("checkpoint_"):-len(".pth")]
@@ -82,9 +84,9 @@ def promote_final_ckpt_to_best(cfg):
             f"skip_eval promotion: no checkpoint_<epoch>.pth found in {out_dir}"
         )
     final = max(numbered, key=_epoch_of)
-    best = os.path.join(out_dir, step1.best_ckpt_name)
+    best = os.path.join(out_dir, best_ckpt_name)
     shutil.copyfile(final, best)
-    print(f"[step1] skip_eval: promoted {os.path.basename(final)} -> {step1.best_ckpt_name}")
+    print(f"[step1] skip_eval: promoted {os.path.basename(final)} -> {best_ckpt_name}")
 
 
 @record
@@ -114,7 +116,11 @@ def main():
     runner.train()
 
     if cfg.run_cfg.qformer_stage3_step1.get("skip_eval", False) and get_rank() == 0:
-        promote_final_ckpt_to_best(cfg)
+        # runner.output_dir is run_cfg.output_dir/<job_id> (the real save dir) --
+        # this is exactly where Step-2 looks for best_ckpt_name.
+        promote_final_ckpt_to_best(
+            str(runner.output_dir), cfg.run_cfg.qformer_stage3_step1.best_ckpt_name
+        )
 
 
 if __name__ == "__main__":
