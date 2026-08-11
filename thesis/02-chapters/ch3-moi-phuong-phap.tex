@@ -34,7 +34,7 @@ Hình~\ref{fig:kien-truc}:
     \item \textbf{Cầu nối Q-Former} -- nén và căn chỉnh véc-tơ CF vào không gian ngữ nghĩa
     của LLM thông qua cross-attention với các véc-tơ truy vấn học được.
 
-    \item \textbf{Mô hình ngôn ngữ lớn (LLM)} -- thực hiện suy luận và sinh câu trả lời
+    \item \textbf{Mô hình ngôn ngữ lớn (LLM)} -- suy luận và sinh câu trả lời
     ``Yes/No''.
 \end{enumerate}
 
@@ -79,7 +79,7 @@ luyện của MovieLens-1M (chi tiết tại Mục~\ref{sec:thiet-lap-thuc-nghie
 \subsection{Lý do chọn Q-Former thay lớp chiếu tuyến tính}
 \label{ssec:ly-do-qformer}
 
-Lớp chiếu tuyến tính của CoLLM~\cite{collm2023} thực hiện ánh xạ $f: \mathbb{R}^d
+Lớp chiếu tuyến tính của CoLLM~\cite{collm2023} ánh xạ $f: \mathbb{R}^d
 \rightarrow \mathbb{R}^{d_{\text{LLM}}}$ qua một ma trận trọng số duy nhất. Thiết kế
 này có hai hạn chế:
 
@@ -218,9 +218,9 @@ gần như trung tính khi uAUC đã bão hòa (MovieLens-1M).
 \section{Các lựa chọn thiết kế}
 \label{sec:lua-chon-thiet-ke}
 
-Ngoài kiến trúc cầu nối Q-Former, SigLLM kết hợp một số lựa chọn thiết kế bổ sung. Các
-lựa chọn này được ghi nhận minh bạch nhưng không phải đóng góp chính của luận văn; vai
-trò của từng lựa chọn được đánh giá qua ablation ở Mục~\ref{sec:ablation}.
+Ngoài kiến trúc cầu nối Q-Former, SigLLM kết hợp một số lựa chọn thiết kế bổ sung. Luận
+văn ghi nhận các lựa chọn này một cách minh bạch, nhưng chúng không phải đóng góp chính;
+vai trò của từng lựa chọn được đánh giá qua ablation ở Mục~\ref{sec:ablation}.
 
 \subsection{Biểu diễn đa token cho tín hiệu CF}
 \label{ssec:da-token}
@@ -288,14 +288,14 @@ vì Q-Former có thể tập trung vào các khía cạnh của tín hiệu CF l
 CTR cụ thể. Trong bài toán BLIP-2/InstructBLIP, conditioning theo chỉ dẫn mang lại cải
 thiện đáng kể trên các tác vụ zero-shot~\cite{instructblip2023}.
 
-\textit{Lưu ý về phạm vi của conditioning.} Trong InstructBLIP, sức mạnh của cơ chế đến
+\textit{Về phạm vi của conditioning.} Trong InstructBLIP, sức mạnh của cơ chế đến
 từ việc chỉ dẫn \textit{thay đổi} giữa nhiều tác vụ khác nhau, khiến cùng một đầu vào cho
 ra biểu diễn khác nhau tùy tác vụ. Trong phiên bản hiện tại của SigLLM, chỉ dẫn CTR được
 giữ \textit{cố định} cho mọi mẫu; do đó cơ chế thực chất gần với Q-Former truy vấn cố định
 có bổ sung ngữ cảnh tác vụ ở tầng self-attention, hơn là conditioning phụ thuộc từng mẫu
 theo đúng nghĩa của InstructBLIP. Việc khảo sát nhiều mẫu chỉ dẫn khác nhau (ví dụ, chỉ
 dẫn phụ thuộc thể loại phim hay hồ sơ người dùng) để khai thác đầy đủ conditioning phụ
-thuộc mẫu được để ngỏ như một hướng thực nghiệm; luận văn không claim vượt quá những gì
+thuộc mẫu được để ngỏ như một hướng thực nghiệm; luận văn không tuyên bố vượt quá những gì
 cấu hình chỉ dẫn cố định hỗ trợ.
 
 \subsection{Kết quả và vị trí trong luận văn}
@@ -304,7 +304,7 @@ cấu hình chỉ dẫn cố định hỗ trợ.
 Thực nghiệm về hiệu quả của InstructBLIP trên bài toán gợi ý được trình bày ở
 Mục~\ref{sec:ket-qua-chinh} và Mục~\ref{sec:ablation} của Chương~\ref{Chapter4}. Như
 đã lưu ý ở Mục~\ref{sec:dong-gop}, kết quả của hướng tăng cường này vẫn đang trong quá
-trình thực nghiệm; luận văn báo cáo những gì đã đo được mà không phóng đại claim vượt
+trình thực nghiệm; luận văn báo cáo những gì đã đo được mà không phóng đại vượt
 quá bằng chứng.
 
 \section{Quy trình huấn luyện ba giai đoạn}
@@ -372,7 +372,7 @@ tái lập.
 \subsection{Giai đoạn 2: Tiền huấn luyện sinh}
 \label{ssec:stage2}
 
-Q-Former và lớp chiếu được huấn luyện với mục tiêu sinh ngôn ngữ: từ biểu diễu Q-Former
+Q-Former và lớp chiếu được huấn luyện với mục tiêu sinh ngôn ngữ: từ biểu diễn Q-Former
 của tín hiệu CF, sinh văn bản mô tả vật phẩm. Giai đoạn này dạy đầu ra của cầu nối trở
 thành soft token mà LLM có thể diễn giải -- tức căn chỉnh không gian Q-Former với không
 gian ngữ nghĩa của LLM đông cứng.
