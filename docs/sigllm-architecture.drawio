@@ -1,0 +1,167 @@
+<mxfile host="app.diagrams.net" agent="Claude">
+  <diagram id="sigllm-arch" name="SigLLM Architecture">
+    <mxGraphModel dx="2020" dy="1067" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1150" pageHeight="1160" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontStyle=1;fontSize=18;" value="SigLLM Architecture" vertex="1">
+          <mxGeometry height="30" width="360" x="260" y="16" as="geometry" />
+        </mxCell>
+        <mxCell id="legFrozen" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="Frozen" vertex="1">
+          <mxGeometry height="26" width="80" x="840" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legTrained" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="Trained" vertex="1">
+          <mxGeometry height="26" width="80" x="930" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legCore" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="Core (Q-Former)" vertex="1">
+          <mxGeometry height="26" width="110" x="1020" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="in1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" value="User u" vertex="1">
+          <mxGeometry height="36" width="75" x="320" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="in2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" value="History" vertex="1">
+          <mxGeometry height="36" width="75" x="403" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="in3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" value="Target i" vertex="1">
+          <mxGeometry height="36" width="75" x="486" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="mf" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;verticalAlign=middle;" value="Matrix Factorization (MF)&#xa;frozen" vertex="1">
+          <mxGeometry height="50" width="220" x="330" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="euser" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" value="e_u  (user CF)" vertex="1">
+          <mxGeometry height="30" width="140" x="370" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="ehist" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" value="e_hist  (history CF)" vertex="1">
+          <mxGeometry height="30" width="140" x="370" y="283" as="geometry" />
+        </mxCell>
+        <mxCell id="eitem" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" value="e_i  (target CF)" vertex="1">
+          <mxGeometry height="30" width="140" x="370" y="321" as="geometry" />
+        </mxCell>
+        <mxCell id="qf" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;strokeWidth=3;verticalAlign=top;align=center;fontStyle=1;fontSize=12;spacingTop=6;" value="Q-Former  (core)" vertex="1">
+          <mxGeometry height="300" width="320" x="280" y="390" as="geometry" />
+        </mxCell>
+        <mxCell id="qfQueries" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" value="Learnable Queries  (Q = 16)" vertex="1">
+          <mxGeometry height="40" width="220" x="330" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="qfSelf" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;fontStyle=1;" value="Self-Attention" vertex="1">
+          <mxGeometry height="40" width="240" x="320" y="495" as="geometry" />
+        </mxCell>
+        <mxCell id="qfCross" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" value="Cross-Attention" vertex="1">
+          <mxGeometry height="40" width="240" x="320" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="cfq" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=12;" value="Z = cf_q  [B, 16, 768]" vertex="1">
+          <mxGeometry height="34" width="180" x="350" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="qfInstr" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="Instruction tokens" vertex="1">
+          <mxGeometry height="40" width="150" x="640" y="495" as="geometry" />
+        </mxCell>
+        <mxCell id="proj" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="Projection" vertex="1">
+          <mxGeometry height="40" width="180" x="350" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="soft" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="Soft Tokens&#xa;&lt;CFTokens&gt;" vertex="1">
+          <mxGeometry height="44" width="180" x="350" y="800" as="geometry" />
+        </mxCell>
+        <mxCell id="inject" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontSize=12;" value="Weight Injection&#xa;ΔW → q_proj / v_proj&#xa;(optional)" vertex="1">
+          <mxGeometry height="114" width="200" x="640" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;verticalAlign=middle;" value="LLM — Qwen2-7B-Instruct (frozen) + LoRA" vertex="1">
+          <mxGeometry height="55" width="440" x="220" y="900" as="geometry" />
+        </mxCell>
+        <mxCell id="out" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" value="Yes / No  (CTR)" vertex="1">
+          <mxGeometry height="44" width="210" x="335" y="990" as="geometry" />
+        </mxCell>
+        <mxCell id="trTitle" parent="1" style="text;html=1;align=left;fontStyle=1;fontSize=13;" value="Training (3 stages)" vertex="1">
+          <mxGeometry height="24" width="200" x="930" y="420" as="geometry" />
+        </mxCell>
+        <mxCell id="s1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" value="Stage 1&#xa;Representation" vertex="1">
+          <mxGeometry height="48" width="190" x="930" y="452" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" value="Stage 2&#xa;Generative" vertex="1">
+          <mxGeometry height="48" width="190" x="930" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="Stage 3&#xa;CTR fine-tune" vertex="1">
+          <mxGeometry height="48" width="190" x="930" y="568" as="geometry" />
+        </mxCell>
+        <mxCell id="e_st1" edge="1" parent="1" source="s1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#999999;" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_st2" edge="1" parent="1" source="s2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#999999;" target="s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_in1" edge="1" parent="1" source="in1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;" target="mf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_in2" edge="1" parent="1" source="in2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;" target="mf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_in3" edge="1" parent="1" source="in3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;" target="mf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mf1" edge="1" parent="1" source="mf" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="euser">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mf2" edge="1" parent="1" source="euser" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=none;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="ehist">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mf3" edge="1" parent="1" source="ehist" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=none;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="eitem">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_cf1" edge="1" parent="1" source="euser" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" target="qfCross">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="190" y="260" />
+              <mxPoint x="190" y="615" />
+            </Array>
+            <mxPoint x="320" y="620" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_cf2" edge="1" parent="1" source="ehist" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="qfCross">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="220" y="298" />
+              <mxPoint x="220" y="605" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_cf3" edge="1" parent="1" source="eitem" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.25;entryDx=0;entryDy=0;" target="qfCross">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="250" y="336" />
+              <mxPoint x="250" y="595" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_qq" edge="1" parent="1" source="qfQueries" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;" target="qfSelf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_qi" edge="1" parent="1" source="qfInstr" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="qfSelf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_sc" edge="1" parent="1" source="qfSelf" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;" target="qfCross">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_cz" edge="1" parent="1" source="qfCross" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#9673a6;" target="cfq">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_zp" edge="1" parent="1" source="cfq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="proj">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_zi" edge="1" parent="1" source="cfq" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#999999;dashed=1;exitX=0.9;exitY=1;exitDx=0;exitDy=0;" target="inject">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ps" edge="1" parent="1" source="proj" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="soft">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_sl" edge="1" parent="1" source="soft" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#82b366;" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_il" edge="1" parent="1" source="inject" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#999999;dashed=1;" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lo" edge="1" parent="1" source="llm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeColor=#333333;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="out">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,293 @@
+% !TEX root = ../main.tex
+\chapter{Phương pháp đề xuất}
+\label{Chapter3}
+
+Chương này trình bày chi tiết mô hình đề xuất, ký hiệu là SigLLM, cùng quy trình huấn
+luyện và năm đóng góp của khóa luận. Xuất phát từ hai hạn chế đối lập được phân tích ở
+Chương~\ref{Chapter2} -- mô hình ngôn ngữ lớn thuần văn bản thiếu tín hiệu lọc cộng tác,
+trong khi mô hình lọc cộng tác thuần thiếu ngữ nghĩa -- SigLLM sử dụng một cầu nối
+Q-Former để đưa biểu diễn lọc cộng tác vào mô hình ngôn ngữ lớn được giữ đông cứng.
+Mục~\ref{sec:kien-truc-tong-quan} mô tả kiến trúc tổng thể. Các
+Mục~\ref{sec:mf}--\ref{sec:ba-giai-doan} lần lượt trình bày ba khối thành phần và quy
+trình huấn luyện ba giai đoạn. Các Mục~\ref{sec:cora}--\ref{sec:rank-loss} trình bày
+năm đóng góp.
+
+\section{Tổng quan kiến trúc}
+\label{sec:kien-truc-tong-quan}
+
+Bài toán được giải quyết là dự đoán tỉ lệ nhấp (Click-Through Rate -- CTR). Cho một
+người dùng $u$, lịch sử tương tác của người dùng và một phim mục tiêu $i$, mô hình đưa
+ra dự đoán nhị phân về khả năng người dùng thích phim mục tiêu, biểu diễn dưới dạng câu
+trả lời ``Có'' hoặc ``Không''. Đây là bài toán phân loại nhị phân, được đánh giá bằng
+hai độ đo AUC và uAUC (Chương~\ref{Chapter4}).
+
+SigLLM gồm ba khối nối tiếp, minh họa ở Hình~\ref{fig:kien-truc}. Khối \textbf{Phân rã
+ma trận} (Matrix Factorization -- MF) cung cấp các véc-tơ nhúng lọc cộng tác cho người
+dùng và vật phẩm. Khối \textbf{cầu nối Q-Former} nén các véc-tơ này thành một khối
+\textit{soft token} và căn chỉnh chúng với ngữ nghĩa văn bản của phim. Khối \textbf{mô
+hình ngôn ngữ lớn} (Large Language Model -- LLM) thực hiện suy luận và sinh câu trả lời.
+
+Một đặc điểm thiết kế của mô hình là phần lớn tham số được giữ đông cứng: cả MF lẫn LLM
+đều không được cập nhật trong quá trình huấn luyện. Chỉ Q-Former, các lớp chiếu, bộ
+chuyển thể LoRA~\cite{lora2021} và bộ tiêm CoRA được huấn luyện, với nhãn giám sát ở
+giai đoạn cuối là một token ``Có/Không''. Cách thiết kế này bảo toàn tri thức ngôn ngữ
+sẵn có của LLM và giảm chi phí huấn luyện.
+
+\begin{figure}[htp]
+\centering
+\includegraphics[width=12cm]{images/logo.png}
+\caption{Kiến trúc tổng quan của SigLLM. Khối MF đông cứng cung cấp tín hiệu lọc cộng
+tác; Q-Former nén và căn chỉnh tín hiệu này thành soft token; LLM đông cứng thực hiện
+suy luận. Chỉ Q-Former, các lớp chiếu, LoRA và bộ tiêm CoRA được huấn luyện.
+(\textit{Hình minh họa tạm; cần thay bằng sơ đồ kiến trúc chính thức.})}
+\label{fig:kien-truc}
+\end{figure}
+
+\section{Khối Phân rã ma trận}
+\label{sec:mf}
+
+Khối MF đóng vai trò nguồn tín hiệu lọc cộng tác. Từ ma trận tương tác người dùng--vật
+phẩm, MF học ánh xạ mỗi người dùng $u$ và mỗi vật phẩm $i$ thành các véc-tơ nhúng ẩn
+$e_u, e_i \in \mathbb{R}^{d}$ sao cho tích vô hướng $e_u^\top e_i$ phản ánh mức độ phù
+hợp giữa người dùng và vật phẩm. MF được huấn luyện riêng theo mục tiêu xếp hạng cặp
+BPR~\cite{bpr2009}, sau đó được đông cứng. Ba loại tín hiệu được trích ra để đưa vào cầu
+nối: nhúng người dùng $e_u$, nhúng phim mục tiêu $e_i$ và nhúng các phim trong lịch sử
+tương tác.
+
+Việc huấn luyện MF tách rời khỏi các khối còn lại là một lựa chọn thiết kế nhằm cô lập
+chất lượng của tín hiệu lọc cộng tác khỏi quá trình huấn luyện LLM, tạo điều kiện phân
+tích rõ ràng vị trí nút thắt của hệ thống.
+
+\section{Cầu nối Q-Former}
+\label{sec:qformer}
+
+Cầu nối được xây dựng dựa trên kiến trúc Q-Former theo InstructBLIP~\cite{instructblip2023},
+vốn kế thừa từ BLIP-2~\cite{blip2_2023}. Q-Former sử dụng một tập nhỏ các truy vấn học
+được. Trong mỗi lớp, các truy vấn đi qua một tầng self-attention cùng với các token của
+chỉ dẫn (instruction) văn bản, sau đó cross-attention để thu nhận thông tin từ tín hiệu
+lọc cộng tác do MF cung cấp. Đầu ra là một khối truy vấn $\mathbf{Z} = \text{cf\_q} \in
+\mathbb{R}^{B \times Q \times d_{\text{model}}}$, với $Q$ là số truy vấn (mặc định
+$Q=16$) và $d_{\text{model}}=768$.
+
+Vai trò của các thành phần Q-Former thay đổi khi chuyển từ bối cảnh thị giác--ngôn ngữ
+sang gợi ý. Trong InstructBLIP, cross-attention là cơ chế chính, thực hiện nén một chuỗi
+dài các mảng ảnh thành một số ít truy vấn. Trong SigLLM, đầu vào của cross-attention chỉ
+gồm một số ít véc-tơ lọc cộng tác, nên đường self-attention giữa truy vấn và chỉ dẫn trở
+thành cơ chế trích xuất đặc trưng phụ thuộc tác vụ chủ yếu. Nhận định này giải thích quan
+sát rằng việc tăng số lớp Q-Former không cải thiện kết quả, trong khi việc đa dạng hóa
+chỉ dẫn lại có tác dụng.
+
+Khối truy vấn $\mathbf{Z}$ được đưa vào LLM theo hai đường, trình bày chi tiết ở
+Mục~\ref{sec:cora}: đường \textit{soft token} chiếu $\mathbf{Z}$ về không gian embedding
+của LLM rồi chèn vào chỉ dẫn tại vị trí đánh dấu \verb|<CFTokens>|; và đường
+\textit{trọng số} biến $\mathbf{Z}$ thành một lượng trọng số tăng thêm cộng vào các lớp
+attention của LLM.
+
+\section{Quy trình huấn luyện ba giai đoạn}
+\label{sec:ba-giai-doan}
+
+SigLLM được huấn luyện qua ba giai đoạn nối tiếp.
+
+\textbf{Giai đoạn 1 --- Tiền huấn luyện biểu diễn.} Q-Former được huấn luyện bằng các mục
+tiêu tương phản và căn chỉnh giữa tín hiệu lọc cộng tác và văn bản, bao gồm căn chỉnh
+ảnh--văn bản (ITC), so khớp ảnh--văn bản (ITM), sinh văn bản có điều kiện (ITG), cùng các
+mục tiêu tương phản vật phẩm--vật phẩm và người dùng--vật phẩm.
+
+\textbf{Giai đoạn 2 --- Tiền huấn luyện sinh.} Q-Former và lớp chiếu được huấn luyện với
+mục tiêu sinh, để đầu ra của cầu nối trở thành soft token mà LLM có thể diễn giải.
+
+\textbf{Giai đoạn 3 --- Tinh chỉnh CTR.} Giai đoạn này theo giao thức hai bước của
+CoLLM~\cite{collm2023}. Bước 1 huấn luyện LoRA cơ sở với chỉ dẫn chỉ gồm văn bản, không
+có tín hiệu lọc cộng tác, thiết lập một đường cơ sở. Bước 2 huấn luyện mô hình đầy đủ với
+tín hiệu lọc cộng tác được bơm vào (qua soft token, CoRA, hoặc cả hai), khởi tạo từ
+checkpoint của Bước 1.
+
+Năm đóng góp của khóa luận tác động vào các giai đoạn khác nhau và được tổng hợp ở
+Bảng~\ref{tab:cai-tien}.
+
+\begin{table}[ht]
+\caption{Tổng hợp năm đóng góp của khóa luận và giai đoạn tác động}
+\label{tab:cai-tien}
+\begin{center}
+\begin{tabular}{|c|L{5.5cm}|L{5.5cm}|}
+\hline
+\textbf{Mã} & \textbf{Đóng góp} & \textbf{Mục tiêu} \\
+\hline
+A & CoRA -- tiêm tín hiệu lọc cộng tác vào trọng số LLM & Đưa tín hiệu lọc cộng tác vào
+sâu trong tính toán của LLM, tránh nhiễu ở không gian đầu vào \\
+\hline
+B & Tách lớp chiếu người dùng và vật phẩm & Ánh xạ đúng đặc trưng hình học của
+user-factor và item-factor trong không gian MF \\
+\hline
+C & Backbone Instruct và chỉ dẫn ChatML & Tận dụng tiên nghiệm tuân theo chỉ dẫn cho bài
+toán trả lời ``Có/Không'' \\
+\hline
+F & Cân bằng tương phản người dùng--vật phẩm ở Giai đoạn 1 & Bảo đảm mục tiêu căn chỉnh
+vật phẩm--văn bản được huấn luyện đầy đủ \\
+\hline
+-- & Mục tiêu bảo toàn thứ tự & Cải thiện thứ tự xếp hạng nội-người-dùng (uAUC) \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+\section{Đóng góp A --- Tiêm tín hiệu lọc cộng tác vào trọng số LLM}
+\label{sec:cora}
+
+\textbf{Động cơ.} Cách tích hợp tín hiệu lọc cộng tác phổ biến, chẳng hạn
+CoLLM~\cite{collm2023}, chèn soft token vào không gian đầu vào của chỉ dẫn. Khi đó tín
+hiệu định danh và ngữ nghĩa văn bản cùng tồn tại trong một không gian, còn ảnh hưởng của
+soft token tới các tầng sâu chỉ là gián tiếp. CoRA~\cite{cora2024} chỉ ra hai hạn chế của
+hướng tiếp cận không gian đầu vào: tinh chỉnh LLM trên dữ liệu gợi ý làm suy giảm tri
+thức ngôn ngữ, và việc đưa đặc trưng lọc cộng tác vào chỉ dẫn làm nhiễu ngữ nghĩa.
+
+\textbf{Cơ chế.} Theo hướng của CoRA~\cite{cora2024}, khối truy vấn $\mathbf{Z} =
+\text{cf\_q} \in \mathbb{R}^{B \times Q \times d_{\text{model}}}$ được biến thành một
+lượng trọng số tăng thêm hạng thấp, riêng cho từng mẫu, cộng vào các lớp chiếu
+$q_{\text{proj}}$ và $v_{\text{proj}}$ trong khối attention của LLM. Với đầu vào $x$ của
+một lớp, lượng thay đổi $\Delta$ được tính theo Công thức~\ref{eq:cora-delta}:
+
+\begin{equation} \label{eq:cora-delta}
+\Delta = s \cdot g \cdot \big( (x \, A^\top) \, B \big),
+\qquad s = \frac{\alpha}{Q},
+\end{equation}
+
+trong đó $A = P_{\text{down}}(\mathbf{Z})$ và $B = P_{\text{up}}(\mathbf{Z})$ là các phép
+chiếu hạng thấp sinh từ $\mathbf{Z}$, $g$ là một cổng vô hướng, $s$ là hệ số tỉ lệ với
+$\alpha$ là siêu tham số và $Q$ là số truy vấn. Đầu ra của lớp trở thành $\text{output}
++ \Delta$.
+
+Điểm khác biệt so với LoRA tiêu chuẩn nằm ở nguồn của lượng thay đổi. LoRA học một lượng
+thay đổi cố định, dùng chung cho mọi đầu vào, tức thích nghi theo tác vụ. Bộ tiêm ở đây
+sinh $\Delta$ từ khối truy vấn $\mathbf{Z}$ của từng mẫu, nên mỗi người dùng và mỗi phim
+tương ứng với một lượng thay đổi riêng. Bộ sinh $(P_{\text{down}}, P_{\text{up}})$ được
+chia sẻ qua mọi tầng và chỉ tách theo dạng trọng số -- một bộ cho các lớp
+$q_{\text{proj}}$ và một bộ cho các lớp $v_{\text{proj}}$ -- giúp giữ số tham số ở mức
+thấp; toàn bộ biến thiên theo mẫu đến từ $\mathbf{Z}$.
+
+\textbf{Bảo đảm ổn định.} Việc bổ sung một đường truyền mới lên một LLM đông cứng đòi hỏi
+kiểm soát ổn định. Bốn kỹ thuật sau được áp dụng.
+
+\begin{enumerate}
+    \item \textit{Cổng tanh khởi tạo không}, theo Flamingo~\cite{flamingo2022}. Mỗi dạng
+    trọng số có một cổng $g$ khởi tạo bằng $0$, do đó $\tanh(0)=0$ và $\Delta$ bằng $0$ tại
+    thời điểm bắt đầu; LLM giữ nguyên hành vi ban đầu rồi điều chỉnh dần, với $\tanh$ giới
+    hạn $\Delta$ trong khoảng $(-1,1)$. Thực nghiệm không có cổng này cho thấy mô hình phân
+    kỳ và AUC suy giảm về mức ngẫu nhiên $0{,}5$.
+
+    \item \textit{Không khởi tạo không cho $P_{\text{up}}$}. Nếu cả cổng lẫn
+    $P_{\text{up}}$ đều bằng $0$ thì gradient của cả hai bằng $0$ và đường truyền không thể
+    khởi động. Theo Flamingo, chỉ cổng được khởi tạo bằng $0$, còn phép biến đổi được khởi
+    tạo với độ lệch chuẩn $0{,}02$.
+
+    \item \textit{Chuẩn hóa truy vấn về chuẩn L2 đơn vị} trước bộ sinh, nhằm tách độ lớn
+    của $\Delta$ khỏi chuẩn của truy vấn. Chuẩn của truy vấn quan sát được ở mức trung bình
+    khoảng $16$, đủ lớn để gây bất ổn nếu không chuẩn hóa.
+
+    \item \textit{Tính toán ở độ chính xác fp32 và xử lý đa thiết bị}, đồng thời bỏ qua
+    khi kích thước lô không khớp trong quá trình giải mã tăng dần.
+\end{enumerate}
+
+\textbf{Cấu hình.} Bộ tiêm được điều khiển bởi chế độ tiêm (nhận một trong ba giá trị:
+chỉ soft token, chỉ trọng số, hoặc cả hai), hệ số $\alpha$ và các mô-đun đích
+$q_{\text{proj}}, v_{\text{proj}}$. Bộ tiêm được gắn sau LoRA, nên LoRA và CoRA cùng tồn
+tại. Ngay cả ở chế độ chỉ trọng số, Q-Former vẫn hoạt động như bộ mã hóa lọc cộng tác,
+vì $\mathbf{Z}$ là đầu ra của Q-Former; bộ tiêm chỉ xác định cách đọc đầu ra đó vào LLM.
+Về chi phí, mỗi lần truyền xuôi bổ sung hai phép nhân ma trận trên mỗi lớp
+$q_{\text{proj}}$ và $v_{\text{proj}}$, làm tăng thời gian và bộ nhớ; độ ổn định phụ thuộc
+vào $\alpha$, nên giá trị này được tăng dần và theo dõi qua AUC trên tập kiểm định.
+
+\section{Đóng góp B --- Tách lớp chiếu người dùng và vật phẩm}
+\label{sec:proj}
+
+Ở phiên bản cơ sở, một lớp chiếu chung ánh xạ cả nhúng người dùng lẫn nhúng vật phẩm từ
+không gian MF sang không gian Q-Former. Tuy nhiên, đặc trưng hình học của véc-tơ
+user-factor và véc-tơ item-factor trong không gian MF khác nhau, nên việc dùng chung một
+phép chiếu là không phù hợp. Đóng góp B tách thành hai lớp chiếu riêng: một cho nhúng
+người dùng và một cho các nhúng vật phẩm (phim mục tiêu và lịch sử). Nhờ đó mỗi loại
+nhúng được ánh xạ theo đặc trưng riêng, cho biểu diễn lọc cộng tác đưa vào Q-Former
+nhất quán hơn. Để duy trì tương thích, checkpoint có một lớp chiếu chung được nạp đồng
+thời vào cả hai lớp mới.
+
+\section{Đóng góp C --- Backbone Instruct và chỉ dẫn ChatML}
+\label{sec:instruct}
+
+Phiên bản cơ sở sử dụng backbone Qwen2-7B-Base, một mô hình không được tinh chỉnh theo
+chỉ dẫn, với chỉ dẫn ở dạng hoàn thành văn bản. Đóng góp C thay bằng backbone
+Qwen2-7B-Instruct~\cite{qwen2} và khôi phục định dạng ChatML tương ứng, gồm một thông
+điệp hệ thống yêu cầu trả lời bằng ``Yes'' hoặc ``No'', một lượt người dùng chứa chỉ dẫn
+cùng vị trí \verb|<CFTokens>|, và một lượt trợ lý. Bộ tách token được điều chỉnh để vị
+trí soft token không trùng với các token điều khiển \verb+<|im_start|>+ và
+\verb+<|im_end|>+.
+
+Một phương án thay thế là tăng dung lượng LoRA trên backbone Base. Thực nghiệm cho thấy
+phương án này làm giảm chất lượng: khi tăng hạng LoRA lên $r=16$ trên các lớp
+$[q,k,v,o]$, mô hình quá khớp trên tập dữ liệu nhỏ, với mất mát huấn luyện giảm nhanh hơn
+nhưng uAUC trên tập kiểm định giảm. Kết quả này cho thấy dung lượng LoRA không phải là
+nút thắt; nút thắt nằm ở chất lượng căn chỉnh của Q-Former ở Giai đoạn 1. Điều còn thiếu
+là một tiên nghiệm tuân theo chỉ dẫn tốt hơn, vốn được backbone Instruct cung cấp sẵn,
+cho phép LoRA nhỏ tập trung vào việc sử dụng tín hiệu lọc cộng tác. Do backbone Instruct
+được huấn luyện với định dạng ChatML còn backbone Base không xử lý các token điều khiển
+tương ứng, việc thay backbone kéo theo thay đổi định dạng chỉ dẫn.
+
+\section{Đóng góp F --- Cân bằng tương phản người dùng--vật phẩm ở Giai đoạn 1}
+\label{sec:balance}
+
+\textbf{Vấn đề.} Ở Giai đoạn 1, dữ liệu huấn luyện là một danh sách trộn ba loại mẫu:
+vật phẩm--văn bản (mục tiêu căn chỉnh chính), vật phẩm--vật phẩm, và người dùng--vật
+phẩm. Mỗi lô được tách theo loại và tính mất mát riêng, trong đó một mất mát chỉ được kích
+hoạt khi lô chứa ít nhất hai mẫu cùng loại. Trên tập ML-1M, số cặp người dùng--vật phẩm
+dương vào khoảng $888$ nghìn, trong khi số cặp vật phẩm--văn bản chỉ khoảng $3$ nghìn,
+tức tỉ lệ mẫu vật phẩm--văn bản khoảng $0{,}34\%$. Với lô kích thước $64$, kỳ vọng số mẫu
+vật phẩm--văn bản mỗi lô chỉ khoảng $0{,}22$, nên điều kiện ``ít nhất hai mẫu'' hiếm khi
+được thỏa. Hệ quả là các mục tiêu căn chỉnh vật phẩm--văn bản (ITC, ITM, ITG) gần như
+không được huấn luyện, làm suy giảm chất lượng căn chỉnh của Q-Former.
+
+\textbf{Giải pháp.} Đóng góp F điều chỉnh ở hai tầng, tổng hợp ở Bảng~\ref{tab:balance}:
+giới hạn số cặp người dùng--vật phẩm khi dựng dữ liệu, nhằm thay đổi tần suất xuất hiện;
+và giảm trọng số mất mát người dùng--vật phẩm khi huấn luyện, nhằm điều hòa cường độ đóng
+góp.
+
+\begin{table}[ht]
+\caption{Hai điều chỉnh của Đóng góp F}
+\label{tab:balance}
+\begin{center}
+\begin{tabular}{|L{4cm}|L{3cm}|L{5cm}|}
+\hline
+\textbf{Điều chỉnh} & \textbf{Tầng} & \textbf{Tác động} \\
+\hline
+Giới hạn số cặp người dùng--vật phẩm ở mức $20{.}000$ & Dữ liệu & Nâng tỉ lệ mẫu
+vật phẩm--văn bản lên khoảng $13\%$; với lô $64$, kỳ vọng khoảng $8$ mẫu, nên điều kiện
+``ít nhất hai mẫu'' gần như luôn được thỏa \\
+\hline
+Giảm trọng số mất mát người dùng--vật phẩm từ $1{,}0$ xuống $0{,}5$ & Mất mát & Điều hòa
+cường độ gradient người dùng--vật phẩm \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+Việc thay đổi giới hạn số cặp yêu cầu dựng lại tệp dữ liệu, vì giới hạn được cố định trong
+tệp lúc dựng, trong khi trọng số mất mát được đọc lúc huấn luyện và có hiệu lực ngay. Giới
+hạn hiện được thực hiện bằng cách lấy phần đầu của danh sách; nếu danh sách được sắp theo
+người dùng hoặc thời gian thì cách này có thể gây thiên lệch, và một cải tiến là xáo trộn
+danh sách trước khi cắt.
+
+\section{Mục tiêu bảo toàn thứ tự cho xếp hạng nội-người-dùng}
+\label{sec:rank-loss}
+
+Bốn đóng góp trên chủ yếu cải thiện khả năng phân biệt ở mức tổng thể, tương ứng với độ
+đo AUC. Độ đo uAUC đánh giá thứ tự xếp hạng trong phạm vi từng người dùng và bất biến với
+các phép biến đổi đơn điệu riêng theo người dùng; do đó các tín hiệu chỉ khác biệt giữa
+các người dùng không cải thiện uAUC. Cơ chế của hiện tượng này được phân tích ở
+Mục~\ref{sec:nghich-ly} của Chương~\ref{Chapter4}. Nhằm cải thiện trực tiếp thứ tự
+nội-người-dùng, khóa luận bổ sung một mục tiêu bảo toàn thứ tự (rank-preserving
+collaborative-alignment) ở tầng căn chỉnh, thay vì bổ sung tín hiệu phân biệt giữa các
+người dùng. Mục tiêu này là một thành phần tùy chọn và được đánh giá tách biệt.
+
+\section{Kết chương}
+
+Chương này đã trình bày kiến trúc ba khối của SigLLM, quy trình huấn luyện ba giai đoạn,
+và năm đóng góp của khóa luận. Luận điểm xuyên suốt là nút thắt của hệ thống nằm ở chất
+lượng căn chỉnh của Q-Former, chứ không phải dung lượng của mô hình ngôn ngữ lớn.
+Chương~\ref{Chapter4} kiểm chứng các đóng góp này bằng thực nghiệm trên tập MovieLens-1M.

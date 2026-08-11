@@ -1,0 +1,335 @@
+% !TEX root = ../main.tex
+\chapter{Các công trình liên quan}
+\label{Chapter2}
+
+Chương này xây dựng nền tảng lý thuyết cho luận văn qua bốn nhánh phân tích nối tiếp
+nhau. \textit{Nhánh đầu tiên} (Mục~\ref{sec:cf-truyen-thong}) trình bày lọc cộng tác
+truyền thống và các hạn chế cố hữu của nó, dẫn đến nhu cầu kết hợp LLM. \textit{Nhánh
+thứ hai} (Mục~\ref{sec:llm-rec}) phân tích hai hướng khai thác LLM cho hệ thống tư vấn
+và chỉ ra rào cản về độ dài ngữ cảnh -- yếu tố buộc tín hiệu CF phải được biểu diễn
+dưới dạng véc-tơ compact thay vì văn bản. \textit{Nhánh thứ ba}
+(Mục~\ref{sec:cach-noi-cf-llm}) phân tích năm cách tích hợp CF vào LLM qua không gian
+véc-tơ, làm nổi bật điểm mạnh và hạn chế của từng hướng. \textit{Nhánh thứ tư}
+(Mục~\ref{sec:nen-tang-qformer}) trình bày nền tảng kiến trúc Q-Former từ BLIP-2 và
+InstructBLIP -- cơ sở lý thuyết cho phương pháp đề xuất ở Chương~\ref{Chapter3}.
+
+\section{Lọc cộng tác truyền thống}
+\label{sec:cf-truyen-thong}
+
+Lọc cộng tác (collaborative filtering -- CF) khai thác hành vi tập thể của người dùng:
+những người dùng có hành vi tương tự trong quá khứ có xu hướng thích những vật phẩm
+giống nhau trong tương lai. Phương pháp này không cần thông tin nội dung vật phẩm, chỉ
+dựa trên ma trận tương tác người dùng--vật phẩm~\cite{zhang2019deep}.
+
+\subsection{Phân rã ma trận}
+\label{ssec:mf}
+
+Phân rã ma trận (matrix factorization -- MF)~\cite{mf2009} là phương pháp CF nền tảng,
+đạt được thành công lớn trong cuộc thi Netflix Prize. MF học ánh xạ mỗi người dùng $u$
+và vật phẩm $i$ thành các véc-tơ nhúng ẩn $e_u, e_i \in \mathbb{R}^d$ sao cho tích vô
+hướng $e_u^\top e_i$ xấp xỉ mức độ tương thích. Hàm mục tiêu phổ biến là hồi quy bình
+phương tối thiểu (RMSE) trên các đánh giá quan sát được, hoặc học xếp hạng cặp theo mục
+tiêu BPR~\cite{bpr2009}.
+
+Điểm mạnh của MF là tính đơn giản, khả năng mở rộng và hiệu quả thực nghiệm đã được
+kiểm chứng. Tuy nhiên, MF học biểu diễn tuyến tính qua tích vô hướng, hạn chế khả năng
+mô hình hóa các quan hệ phi tuyến phức tạp. Lọc cộng tác thần kinh (neural collaborative
+filtering -- NCF)~\cite{ncf2017} mở rộng MF bằng cách thay tích vô hướng bởi mạng nơ-ron
+nhiều lớp, cho phép học các tương tác người dùng--vật phẩm phi tuyến.
+
+\subsection{Lọc cộng tác dựa trên đồ thị}
+\label{ssec:lightgcn}
+
+Tương tác người dùng--vật phẩm có thể được biểu diễn tự nhiên như một đồ thị hai phía
+(bipartite graph). LightGCN~\cite{lightgcn2020} khai thác cấu trúc đồ thị này bằng mạng
+tích chập đồ thị (graph convolutional network -- GCN): nhúng của mỗi nút được cập nhật
+bằng cách tổng hợp tuyến tính nhúng của các nút láng giềng, qua nhiều bước lan truyền.
+LightGCN đạt hiệu quả cao hơn NCF trên nhiều bộ dữ liệu chuẩn nhờ khai thác được thông
+tin cấu trúc bậc cao của đồ thị tương tác.
+
+\subsection{Hạn chế của lọc cộng tác thuần túy}
+\label{ssec:han-che-cf}
+
+Mặc dù đạt hiệu quả tốt, các phương pháp CF truyền thống tồn tại ba hạn chế cơ bản:
+
+\textbf{Vấn đề thưa thớt dữ liệu.} Ma trận tương tác người dùng--vật phẩm trong thực
+tế cực kỳ thưa: tỉ lệ quan sát trên tổng số cặp thường dưới 1\%. Dữ liệu thưa dẫn đến
+ước lượng nhúng kém chất lượng cho người dùng và vật phẩm ít tương tác.
+
+\textbf{Vấn đề khởi động nguội.} Người dùng mới và vật phẩm mới không có lịch sử tương
+tác, nên các phương pháp CF không thể xây dựng biểu diễn nhúng cho họ. Đây là hạn chế
+nghiêm trọng trong hệ thống thực tế, nơi người dùng mới và vật phẩm mới liên tục xuất
+hiện.
+
+\textbf{Thiếu hiểu biết ngữ nghĩa.} Biểu diễn CF học thuần từ tín hiệu tương tác nhị
+phân, không nắm được nội dung văn bản mô tả vật phẩm hay sở thích người dùng. Điều này
+hạn chế khả năng gợi ý cho vật phẩm mới (zero interaction) và khả năng giải thích gợi ý
+bằng ngôn ngữ tự nhiên.
+
+Những hạn chế này thúc đẩy hướng kết hợp LLM -- có khả năng hiểu ngữ nghĩa văn bản
+phong phú -- vào hệ thống tư vấn.
+
+\section{Mô hình ngôn ngữ lớn cho hệ thống tư vấn}
+\label{sec:llm-rec}
+
+LLM được huấn luyện trước trên khối lượng văn bản khổng lồ, thu được khả năng hiểu ngữ
+nghĩa sâu sắc và suy luận linh hoạt. Khai thác LLM cho hệ thống tư vấn đã trở thành một
+trong những hướng nghiên cứu tích cực nhất trong những năm gần đây~\cite{llmrec2023}.
+
+\subsection{Hai hướng khai thác LLM}
+\label{ssec:hai-huong}
+
+Có thể phân loại các phương pháp kết hợp LLM và hệ thống tư vấn thành hai hướng chính:
+
+\textbf{LLM-enhanced}: dùng LLM như bộ mã hóa để tạo biểu diễn ngữ nghĩa cho người
+dùng và vật phẩm, sau đó tích hợp vào pipeline gợi ý truyền thống. Trong hướng này, LLM
+chủ yếu đóng vai trò trích xuất đặc trưng ngôn ngữ; quyết định gợi ý vẫn do các mô hình
+CF hoặc xếp hạng đảm nhận.
+
+\textbf{LLMs-as-RS}: đặt bài toán gợi ý trực tiếp như một tác vụ sinh ngôn ngữ, trong
+đó LLM vừa hiểu ngữ cảnh vừa đưa ra gợi ý. P5~\cite{p52022} là một trong những công
+trình đầu tiên theo hướng này, đặt nhiều bài toán gợi ý (xếp hạng, dự đoán đánh giá,
+giải thích) thành các cặp câu hỏi--trả lời và huấn luyện một mô hình T5 thống nhất.
+BIGRec~\cite{bigrec2023} tinh chỉnh LLM để gợi ý bằng cách ánh xạ đầu ra ngôn ngữ về
+không gian vật phẩm qua cơ chế căn chỉnh.
+
+Hướng LLMs-as-RS đặc biệt hấp dẫn vì khả năng tận dụng tri thức thế giới sẵn có trong
+LLM để giải quyết cold-start -- người dùng và vật phẩm mới có thể được mô tả bằng văn
+bản, và LLM có thể suy luận về sở thích ngay cả khi chưa có lịch sử tương tác. Luận văn
+này theo đuổi hướng LLMs-as-RS.
+
+\subsection{Rào cản về độ dài ngữ cảnh}
+\label{ssec:rao-can-context}
+
+Khi đặt bài toán gợi ý như tác vụ ngôn ngữ, cách tự nhiên nhất để cung cấp thông tin
+hành vi là mã hóa lịch sử tương tác thành văn bản -- chẳng hạn, liệt kê tên các phim
+người dùng đã xem. Tuy nhiên, người dùng trong thực tế có thể có hàng trăm đến hàng
+nghìn tương tác. Với mỗi tên phim chiếm vài token, lịch sử đầy đủ nhanh chóng vượt quá
+giới hạn ngữ cảnh của LLM (thường 2K--8K token với các mô hình phổ biến), hoặc tiêu tốn
+lượng tính toán rất lớn nếu dùng mô hình context dài.
+
+Đây là rào cản cơ bản đã được nhận diện trong CoLLM~\cite{collm2023}: dù LLM có khả
+năng hiểu ngữ nghĩa, ta không thể đơn giản đưa toàn bộ lịch sử tương tác vào chỉ dẫn
+dưới dạng văn bản. Giải pháp là biểu diễn tín hiệu hành vi dưới dạng \textit{véc-tơ CF
+compact} -- tổng hợp từ toàn bộ lịch sử -- và đưa véc-tơ này vào LLM như soft token.
+Rào cản này đặt ra vấn đề trung tâm: làm thế nào để \textit{căn chỉnh} véc-tơ CF vào
+không gian ngữ nghĩa LLM một cách hiệu quả?
+
+\section{Các phương pháp tích hợp CF vào LLM qua không gian véc-tơ}
+\label{sec:cach-noi-cf-llm}
+
+Nhiều công trình đã đề xuất các cơ chế khác nhau để đưa véc-tơ CF vào LLM. Mục này phân
+tích năm hướng chính và điểm phản biện của từng hướng.
+
+\subsection{Chiếu tuyến tính: CoLLM}
+\label{ssec:collm}
+
+CoLLM~\cite{collm2023} là baseline nền tảng của luận văn này. CoLLM dùng một lớp chiếu
+tuyến tính (lớp MLP một lớp) để ánh xạ véc-tơ CF từ không gian MF sang không gian nhúng
+của LLM, tạo thành soft token được chèn vào chỉ dẫn. LLM (Llama-2~\cite{llama2}) sau đó
+thực hiện dự đoán CTR dưới dạng trả lời ``Yes'' hoặc ``No''. Quy trình huấn luyện của
+CoLLM gồm hai bước: bước đầu tiên huấn luyện LoRA cơ sở chỉ với văn bản (không CF), bước
+thứ hai huấn luyện mô hình đầy đủ với soft token CF được bơm vào.
+
+Điểm mạnh của CoLLM là sự đơn giản và hiệu quả như một baseline mạnh. Tuy nhiên, lớp
+chiếu tuyến tính có hai hạn chế cơ bản: (i)~phép biến đổi tuyến tính không thể nắm được
+các quan hệ phi tuyến phức tạp giữa không gian CF và không gian ngữ nghĩa LLM; và
+(ii)~không có cơ chế trích chọn có kiểm soát -- toàn bộ véc-tơ CF được ánh xạ qua một
+phép biến đổi duy nhất, không phân biệt thành phần nào quan trọng với ngữ cảnh hiện tại.
+
+\subsection{Học tương phản: SellaRec}
+\label{ssec:sellarec}
+
+SellaRec~\cite{sellarec2024} căn chỉnh biểu diễn CF và biểu diễn ngôn ngữ thông qua học
+tương phản (contrastive learning) với mục tiêu InfoNCE: kéo gần biểu diễn của cùng vật
+phẩm trong không gian CF và không gian ngôn ngữ, đồng thời đẩy xa các vật phẩm khác nhau.
+Cách tiếp cận này cung cấp một tín hiệu huấn luyện toàn cục mạnh hơn so với chiếu trực
+tiếp.
+
+Đáng chú ý, SellaRec \textit{đã} được đánh giá dưới giao thức CTR với AUC và uAUC trên
+MovieLens-1M -- cùng độ đo và tập dữ liệu với luận văn này. Điều này cho thấy khoảng trống
+đánh giá mà luận văn nhắm đến không phải là khoảng trống của \textit{toàn bộ} dòng CF--LLM,
+mà đặc thù cho \textit{cầu nối Q-Former}: SellaRec lấp khoảng trống bằng cơ chế học tương
+phản, trong khi hướng Q-Former (ILM) vẫn chưa được kiểm chứng dưới giao thức này. Hai cơ
+chế khác nhau về bản chất -- học tương phản căn chỉnh hai không gian qua hàm mất mát toàn
+cục, còn Q-Former trích chọn và tổng hợp tín hiệu CF qua tập truy vấn học được -- nên
+SigLLM và SellaRec bổ sung cho nhau hơn là trùng lặp.
+
+Tuy nhiên, SellaRec dùng Qwen2-7B-Base~\cite{qwen2} làm backbone LLM. Luận văn này dùng
+Vicuna-7B-v1.5~\cite{vicuna2023} -- một mô hình tinh chỉnh chỉ dẫn trên nền Llama-2, cùng
+họ với backbone Llama-2 của CoLLM -- để so sánh trung thực với baseline chính. So sánh số
+liệu giữa SellaRec và SigLLM có thể thực hiện được nhưng cần caveat: sự khác biệt backbone
+(Qwen2-Base so với Vicuna/Llama-2) và giao thức phân chia dữ liệu có thể ảnh hưởng đến kết
+quả quan sát được.
+
+\subsection{Mã hóa dạng văn bản: BinLLM}
+\label{ssec:binllm}
+
+BinLLM~\cite{binllm2024} đề xuất mã hóa véc-tơ CF thành chuỗi ký tự nhị phân, cho phép
+đưa tín hiệu CF vào LLM dưới dạng văn bản thông thường mà không cần soft token. Cách
+tiếp cận này có ưu điểm về tính đơn giản trong triển khai và không yêu cầu thay đổi kiến
+trúc LLM.
+
+Hạn chế của BinLLM nằm ở bước rời rạc hóa: mã hóa nhị phân không thể lưu giữ đầy đủ
+thông tin từ véc-tơ CF liên tục, dẫn đến mất mát thông tin không thể khôi phục. Ngoài
+ra, chuỗi nhị phân không mang ý nghĩa ngữ nghĩa trong từ vựng LLM, nên LLM phải học cách
+diễn giải cú pháp nhị phân -- một bài toán học bổ sung không tầm thường.
+
+\subsection{Tiêm vào trọng số: CoRA}
+\label{ssec:cora-rel}
+
+CoRA~\cite{cora2024} đề xuất một cơ chế khác biệt: thay vì đưa CF vào không gian đầu
+vào của LLM như soft token, CoRA biến đổi véc-tơ CF thành một lượng thay đổi trọng số
+hạng thấp, phụ thuộc vào mẫu (sample-specific), cộng trực tiếp vào các lớp attention của
+LLM. Theo đó, mỗi mẫu (cặp người dùng--vật phẩm) có một tập trọng số điều chỉnh riêng,
+cho phép LLM cá nhân hóa tính toán ở mức độ sâu hơn.
+
+Tuy nhiên, CoRA bỏ hoàn toàn cơ chế soft token -- CF chỉ được đưa vào qua đường trọng số.
+Điều này có nghĩa là CoRA không tận dụng được khả năng căn chỉnh ngữ nghĩa mà soft token
+trong không gian đầu vào cung cấp. CoRA vì thế đại diện cho một \textit{hướng thiết kế
+khác} với luận văn: can thiệp vào trọng số attention của LLM thay vì căn chỉnh tín hiệu CF
+trong không gian đầu vào.
+
+SigLLM đi theo hướng soft token: tín hiệu CF được căn chỉnh qua cầu nối Q-Former rồi chèn
+vào chỉ dẫn dưới dạng soft token, giữ LLM hoàn toàn đông cứng và không sinh trọng số theo
+từng mẫu (chi tiết tại Chương~\ref{Chapter3}). Luận văn không hiện thực cơ chế tiêm trọng
+số của CoRA; thay vào đó, \textit{mô hình} CoRA nguyên bản được dùng như một baseline so
+sánh trong thực nghiệm trên Amazon-Book (Chương~\ref{Chapter4}), đặt cạnh CoLLM và BinLLM
+để định vị SigLLM trong cùng dòng phương pháp.
+
+\subsection{Cầu nối Q-Former: ILM}
+\label{ssec:ilm}
+
+ILM~\cite{ilm2024} là công trình đầu tiên áp dụng Q-Former như cầu nối tích hợp tín hiệu
+CF vào LLM cho bài toán gợi ý. Q-Former sử dụng một tập véc-tơ truy vấn học được cùng
+cơ chế cross-attention để trích xuất thông tin từ véc-tơ CF, thay vì chiếu trực tiếp.
+Cơ chế này có khả năng học cách lọc và tổng hợp tín hiệu CF theo cách phù hợp với không
+gian ngữ nghĩa LLM.
+
+Tuy nhiên, ILM chưa đánh giá dưới giao thức CTR với AUC và uAUC như CoLLM và các công
+trình cùng dòng, nên không thể so sánh trực tiếp hiệu quả của cầu nối Q-Former với lớp
+chiếu tuyến tính. Ngoài ra, cầu nối Q-Former trong ILM chưa được tăng cường bằng các kỹ
+thuật conditioning theo chỉ dẫn như InstructBLIP.
+
+\subsection{Tổng hợp so sánh}
+\label{ssec:tong-hop-so-sanh}
+
+Bảng~\ref{tab:so-sanh-phuong-phap} tổng hợp so sánh các phương pháp tích hợp CF vào LLM
+được phân tích ở trên.
+
+\begin{table}[ht]
+\caption{So sánh các phương pháp tích hợp CF vào LLM qua không gian véc-tơ}
+\label{tab:so-sanh-phuong-phap}
+\begin{center}
+\begin{tabular}{|L{2cm}|L{3cm}|L{3.5cm}|L{3.5cm}|}
+\hline
+\textbf{Phương pháp} & \textbf{Cơ chế tích hợp} & \textbf{Điểm mạnh} & \textbf{Hạn chế} \\
+\hline
+CoLLM \cite{collm2023} & MLP tuyến tính một lớp & Đơn giản; baseline mạnh & Tuyến tính; không có trích chọn có kiểm soát \\
+\hline
+SellaRec \cite{sellarec2024} & Học tương phản & Tín hiệu huấn luyện toàn cục & Backbone khác (Qwen); so sánh hạn chế \\
+\hline
+BinLLM \cite{binllm2024} & Mã hóa nhị phân & Đơn giản; không cần soft token & Mất mát thông tin khi rời rạc hóa \\
+\hline
+CoRA \cite{cora2024} & Tiêm vào trọng số & Cá nhân hóa sâu trong LLM & Bỏ soft token; không tận dụng căn chỉnh đầu vào \\
+\hline
+ILM \cite{ilm2024} & Q-Former (cross-attention) & Trích chọn có kiểm soát & Chưa báo AUC/uAUC; chưa tăng cường InstructBLIP \\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+Phân tích trên dẫn đến kết luận: cầu nối Q-Former hứa hẹn nhất về cơ chế căn chỉnh --
+trích chọn có kiểm soát qua cross-attention, không phụ thuộc vào giả thiết tuyến tính --
+nhưng còn thiếu kiểm chứng dưới giao thức AUC/uAUC và chưa được tăng cường bằng các kỹ
+thuật hiện đại. Đây là khoảng trống mà luận văn này nhắm đến.
+
+\section{Nền tảng kiến trúc Q-Former}
+\label{sec:nen-tang-qformer}
+
+\subsection{BLIP-2: Q-Former cho căn chỉnh ảnh--ngôn ngữ}
+\label{ssec:blip2}
+
+BLIP-2~\cite{blip2_2023} giới thiệu Q-Former (Querying Transformer) như một cầu nối nhẹ
+(lightweight bridge) giữa bộ mã hóa ảnh đông cứng và LLM đông cứng. Q-Former giải quyết
+bài toán: làm thế nào để trích xuất thông tin từ đặc trưng ảnh (không gian liên tục,
+chiều cao) và chuyển thành biểu diễu mà LLM có thể xử lý, mà không cần huấn luyện lại
+hai khối lớn.
+
+Kiến trúc Q-Former gồm một tập nhỏ véc-tơ truy vấn học được $\mathbf{Q} \in
+\mathbb{R}^{N_q \times d}$ (thường $N_q = 32$) và một bộ transformer. Trong mỗi lớp của
+Q-Former, các truy vấn đi qua hai loại attention:
+
+\begin{enumerate}
+    \item \textit{Self-attention} giữa các truy vấn với nhau (và với token ngôn ngữ nếu
+    có): cho phép các truy vấn trao đổi thông tin và điều phối lẫn nhau.
+
+    \item \textit{Cross-attention} từ các truy vấn đến đặc trưng đầu vào (ảnh hoặc CF):
+    cho phép mỗi truy vấn thu nhận thông tin từ nguồn đầu vào một cách có chọn lọc.
+\end{enumerate}
+
+Đầu ra là một khối truy vấn $\mathbf{Z} \in \mathbb{R}^{N_q \times d}$ -- một tập hợp
+compact các véc-tơ đã được ``cất giữ'' thông tin từ đầu vào theo cách tối ưu cho ngữ
+cảnh hiện tại. $\mathbf{Z}$ sau đó được chiếu vào không gian nhúng của LLM và nối với
+prompt văn bản.
+
+BLIP-2 huấn luyện Q-Former qua hai giai đoạn: (1)~tiền huấn luyện biểu diễn với các mục
+tiêu tương phản ảnh--văn bản (ITC), so khớp ảnh--văn bản (ITM) và sinh văn bản có điều
+kiện (ITG); (2)~tiền huấn luyện sinh ngôn ngữ để Q-Former học cách tạo biểu diễn mà LLM
+có thể hiểu. Thiết kế này cho phép BLIP-2 đạt hiệu quả cao trên các tác vụ ảnh--ngôn
+ngữ mà chỉ cần huấn luyện Q-Former nhẹ, giữ nguyên bộ mã hóa ảnh và LLM.
+
+Ý nghĩa cho bài toán gợi ý: Q-Former có thể được thích nghi để thay thế bộ mã hóa ảnh
+bằng bộ mã hóa CF (phân rã ma trận), và thực hiện căn chỉnh CF vào không gian LLM thông
+qua cơ chế cross-attention có kiểm soát.
+
+\subsection{InstructBLIP: Conditioning theo chỉ dẫn}
+\label{ssec:instructblip}
+
+InstructBLIP~\cite{instructblip2023} mở rộng BLIP-2 bằng cách làm cho Q-Former phụ thuộc
+vào chỉ dẫn (instruction): thay vì dùng tập truy vấn cố định, các truy vấn của Q-Former
+tham gia vào self-attention cùng với token chỉ dẫn văn bản. Kết quả là đầu ra $\mathbf{Z}$
+của Q-Former phụ thuộc vào nội dung chỉ dẫn -- cùng một ảnh đầu vào nhưng với chỉ dẫn
+khác nhau, Q-Former trích xuất các đặc trưng ảnh khác nhau.
+
+Cải tiến này cho phép InstructBLIP thực hiện hiệu quả trên nhiều tác vụ ảnh--ngôn ngữ
+đa dạng mà không cần tinh chỉnh riêng từng tác vụ. Kết quả là InstructBLIP vượt trội
+đáng kể so với BLIP-2 trên nhiều benchmark zero-shot.
+
+Ý nghĩa cho bài toán gợi ý: Q-Former với conditioning chỉ dẫn cho phép truy vấn phụ
+thuộc tác vụ -- ví dụ, cùng tín hiệu CF nhưng với chỉ dẫn khác nhau (``người dùng có
+thích phim hành động?'' vs. ``phim này có phù hợp với sở thích của người dùng không?''),
+Q-Former có thể trích xuất các khía cạnh khác nhau của tín hiệu CF. Đây là hướng tăng
+cường chính mà luận văn khảo sát và sẽ được trình bày chi tiết ở Mục~\ref{sec:instructblip-aug}.
+
+\subsection{Kỹ thuật ổn định từ Flamingo}
+\label{ssec:flamingo}
+
+Khi gắn một đường truyền mới lên một LLM đông cứng, việc kiểm soát ổn định là quan
+trọng. Flamingo~\cite{flamingo2022} -- một mô hình đa phương thức quy mô lớn -- đề xuất
+kỹ thuật cổng tanh khởi tạo không (zero-initialized tanh gate): mỗi đường truyền mới có
+một tham số cổng $g$ khởi tạo bằng $0$, sao cho ban đầu $\Delta = \tanh(0) \cdot (\ldots)
+= 0$, tức LLM không bị ảnh hưởng bởi tín hiệu mới ngay từ đầu. Trong quá trình huấn
+luyện, cổng học dần để tiếp nhận tín hiệu mới, và hàm $\tanh$ giới hạn biên độ thay đổi
+trong khoảng $(-1, 1)$, ngăn mô hình phân kỳ. SigLLM kế thừa \textit{nguyên tắc khởi tạo
+bằng không} này: cả phần dịch truy vấn theo người dùng lẫn đầu ra phụ của mục tiêu bảo
+toàn thứ tự đều được khởi tạo bằng không, nên mỗi cơ chế mới bắt đầu ở trạng thái trung
+tính (no-op) và chỉ lớn dần nếu tín hiệu huấn luyện thưởng cho nó (chi tiết tại
+Mục~\ref{sec:qformer}).
+
+\section{Tổng kết và định vị luận văn}
+\label{sec:tong-ket-ch2}
+
+Nhìn lại bốn nhánh phân tích, có thể rút ra câu kết luận sau:
+
+\begin{quote}
+\textit{Trong các phương pháp tích hợp tín hiệu CF vào LLM qua không gian véc-tơ,
+Q-Former nổi lên như cầu nối hứa hẹn nhất: cơ chế cross-attention với tập truy vấn học
+được cho phép trích chọn đặc trưng CF có kiểm soát, thay vì nén thô qua lớp chiếu
+tuyến tính của CoLLM. Tuy nhiên, hướng này chưa được kiểm chứng dưới giao thức AUC/uAUC
+của dòng CoLLM, và vẫn còn nhiều hướng tăng cường chưa được khai thác -- đặc biệt là
+conditioning theo chỉ dẫn theo InstructBLIP -- nên xứng đáng được nghiên cứu sâu hơn.}
+\end{quote}
+
+Chương tiếp theo trình bày kiến trúc SigLLM -- hiện thực hóa và tăng cường cầu nối
+Q-Former cho bài toán gợi ý -- cùng lý do thiết kế và quy trình huấn luyện.

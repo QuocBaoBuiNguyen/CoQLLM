@@ -1,0 +1,119 @@
+% !TEX root = ../main.tex
+\chapter{Kết luận và Hướng phát triển}
+\label{Chapter5}
+
+\section{Tóm tắt đóng góp}
+\label{sec:tom-tat-dong-gop}
+
+Luận văn đặt ra câu hỏi: liệu cầu nối Q-Former -- với cơ chế cross-attention có kiểm
+soát -- có thể căn chỉnh tín hiệu CF vào không gian ngữ nghĩa của LLM hiệu quả
+hơn lớp chiếu tuyến tính của CoLLM hay không? Để trả lời, luận văn thiết kế, hiện thực và đánh
+giá mô hình SigLLM, đóng góp theo hai hướng đã phát biểu ở Mục~\ref{sec:dong-gop}:
+
+\textbf{Đóng góp 1: Cầu nối Q-Former được thích nghi và tăng cường cho bài toán gợi ý.}
+SigLLM thay thế lớp MLP một lớp của CoLLM bằng kiến trúc Q-Former, trong đó tín hiệu CF
+(nhúng người dùng, vật phẩm mục tiêu, lịch sử) thay thế đặc trưng ảnh làm đầu vào
+cross-attention và được đưa vào LLM qua đường soft token. Trên nền đó, luận văn bổ sung hai
+đòn bẩy huấn luyện -- điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự
+nội-người-dùng -- cùng các lựa chọn thiết kế (biểu diễn đa token, backbone đã tinh chỉnh chỉ
+dẫn, tách lớp chiếu người dùng/vật phẩm) và khảo sát InstructBLIP. Kết quả chi tiết được
+trình bày ở Chương~\ref{Chapter4}.
+
+\textbf{Đóng góp 2: Đánh giá có hệ thống dưới giao thức AUC/uAUC trên hai tập dữ liệu.}
+Luận văn đánh giá cầu nối Q-Former dưới giao thức CTR với AUC và uAUC -- cùng giao thức với
+CoLLM -- trên MovieLens-1M và Amazon-Book, cho phép so sánh trực tiếp với CoLLM, BinLLM và
+CoRA. Phân tích ablation tách biệt đóng góp của từng đòn bẩy, và phân rã warm/cold làm rõ
+trần uAUC nằm ở chất lượng nhúng MF.
+
+\section{Kết quả đạt được}
+\label{sec:ket-qua-dat-duoc}
+
+Từ kết quả ở Bảng~\ref{tab:ket-qua-chinh}, Bảng~\ref{tab:ket-qua-book} và
+Bảng~\ref{tab:ablation}, có thể rút ra các kết luận sau:
+
+\begin{itemize}
+    \item \textbf{MovieLens-1M -- vượt SOTA trên cả hai độ đo.} Cấu hình đề xuất
+    (+ \texttt{user\_conditioned}) đạt AUC $0{,}7475$ và uAUC $0{,}6968$, vượt BinLLM
+    ($0{,}7425$/$0{,}6956$) trên cả AUC lẫn uAUC và vượt rõ CoLLM. Đây là điểm đáng chú ý
+    vì nhiều phương pháp cùng dòng chỉ thắng một trong hai độ đo.
+
+    \item \textbf{Amazon-Book -- cạnh tranh/vượt baseline trên domain khó.} Với
+    \texttt{user\_conditioned} (Run-1), SigLLM đạt $0{,}8147$/$0{,}5958$, vượt CoLLM-MF và
+    BinLLM (theo lần chạy lại của CoRA) trên cả hai độ đo. Bổ sung \texttt{align\_rank\_loss}
+    (Run-2) nâng uAUC lên $0{,}6062$, tiệm cận CoRA-MF ($0{,}6262$).
+
+    \item \textbf{Hai đòn bẩy tác động lên hai độ đo khác nhau.} \texttt{user\_conditioned}
+    là đòn bẩy AUC (biến thiên giữa các người dùng); \texttt{align\_rank\_loss} là đòn bẩy
+    uAUC (bảo toàn thứ tự trong người dùng). Việc bật theo từng tập dữ liệu là siêu tham số
+    hợp lệ theo domain.
+
+    \item \textbf{Trần uAUC nằm ở MF teacher, không phải cầu nối.} Phân rã warm/cold cho
+    thấy uAUC nhóm warm cao hơn hẳn nhóm cold trên cả hai tập dữ liệu (ví dụ Amazon-Book:
+    $0{,}6238$ vs $0{,}5258$), cho thấy đòn bẩy cải thiện tiếp theo nằm ở chất lượng nhúng CF
+    cho người dùng/vật phẩm nguội (cold).
+\end{itemize}
+
+\section{Hạn chế}
+\label{sec:han-che-ch5}
+
+Luận văn nêu rõ các hạn chế sau một cách minh bạch:
+
+\begin{enumerate}
+    \item \textbf{Thiếu khoảng tin cậy:} Kết quả từ một seed duy nhất. Biến động thống
+    kê giữa các lần chạy chưa được đo.
+
+    \item \textbf{Thiếu ablation attention-MLP:} Chưa có hàng ablation thay Q-Former bằng
+    bộ chiếu attention-MLP (không truy vấn học được) -- đối chứng quan trọng nhất để cô lập
+    đóng góp của cấu trúc Q-Former. Cùng với các ablation thành phần khác (đa token, tách
+    projector, InstructBLIP, \texttt{align\_rank} trên MovieLens-1M), đây là phần thực
+    nghiệm còn để ngỏ.
+
+    \item \textbf{Chi phí tính toán cao hơn CoLLM:} Cầu nối Q-Former làm tăng chi phí huấn
+    luyện so với lớp MLP đơn giản của CoLLM (dù không sinh trọng số theo từng mẫu như CoRA).
+
+    \item \textbf{Baseline không đồng nhất:} SellaRec dùng backbone LLM khác họ, và trên
+    Amazon-Book số liệu baseline lấy từ lần chạy lại của CoRA (chọn checkpoint theo AUC,
+    khác SigLLM chọn theo uAUC) -- giới hạn khả năng so sánh thuần về cơ chế căn chỉnh.
+
+    \item \textbf{Trần uAUC ở nhóm cold:} uAUC bị chặn trên bởi chất lượng nhúng MF cho
+    người dùng/vật phẩm nguội, không phải bởi cầu nối.
+\end{enumerate}
+
+\section{Hướng phát triển}
+\label{sec:huong-phat-trien}
+
+Từ các hạn chế và quan sát trên, luận văn đề xuất những hướng nghiên cứu tiếp theo:
+
+\textbf{Mở rộng thực nghiệm:}
+\begin{itemize}
+    \item Đánh giá trên Amazon Books và các tập dữ liệu ngoài domain phim để kiểm chứng
+    khả năng tổng quát.
+    \item Chạy nhiều seed và báo cáo mean $\pm$ std để đánh giá độ ổn định.
+\end{itemize}
+
+\textbf{Ablation và phân tích sâu hơn:}
+\begin{itemize}
+    \item Ablation bật/tắt riêng InstructBLIP conditioning để chốt đóng góp độc lập
+    của thành phần này.
+    \item Phân tích attention map của Q-Former để hiểu truy vấn nào học cách trích xuất
+    thông tin gì từ tín hiệu CF.
+\end{itemize}
+
+\textbf{Cải thiện uAUC:}
+\begin{itemize}
+    \item Tiền huấn luyện MF trên dữ liệu dày đặc hơn (nhiều tháng hơn), đặc biệt cho
+    nhóm người dùng/vật phẩm nguội -- đòn bẩy được phân rã warm/cold chỉ ra là trần thực sự
+    của uAUC.
+    \item Mở rộng mục tiêu bảo toàn thứ tự (\texttt{align\_rank\_loss}, đã hiệu quả trên
+    Amazon-Book) sang các domain khác và khảo sát trọng số $\lambda$ tối ưu theo từng tập.
+\end{itemize}
+
+\textbf{Mở rộng kiến trúc:}
+\begin{itemize}
+    \item Bổ sung hàng ablation attention-MLP và các ablation thành phần còn để ngỏ dưới
+    cùng backbone Vicuna để cô lập đầy đủ đóng góp của cấu trúc Q-Former.
+    \item Khảo sát hướng tiêm trọng số kiểu CoRA như một đường \textit{bổ sung} cho soft
+    token (chưa hiện thực trong luận văn này) để so sánh trực tiếp hai cơ chế đưa CF vào LLM.
+    \item Khảo sát các backbone LLM khác (Llama-3, Mistral) để kiểm chứng tính tổng
+    quát của cầu nối Q-Former.
+\end{itemize}
