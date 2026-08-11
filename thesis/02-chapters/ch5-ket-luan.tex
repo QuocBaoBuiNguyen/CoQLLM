@@ -37,7 +37,7 @@ Bảng~\ref{tab:ablation}, có thể rút ra các kết luận sau:
     ($0{,}7425$/$0{,}6956$) trên cả AUC lẫn uAUC và vượt rõ CoLLM. Đây là điểm đáng chú ý
     vì nhiều phương pháp cùng dòng chỉ thắng một trong hai độ đo.
 
-    \item \textbf{Amazon-Book -- cạnh tranh/vượt baseline trên domain khó.} Với
+    \item \textbf{Amazon-Book -- cạnh tranh/vượt baseline trên miền khó.} Với
     \texttt{user\_conditioned} (Run-1), SigLLM đạt $0{,}8147$/$0{,}5958$, vượt CoLLM-MF và
     BinLLM (theo lần chạy lại của CoRA) trên cả hai độ đo. Bổ sung \texttt{align\_rank\_loss}
     (Run-2) nâng uAUC lên $0{,}6062$, tiệm cận CoRA-MF ($0{,}6262$).
@@ -45,7 +45,7 @@ Bảng~\ref{tab:ablation}, có thể rút ra các kết luận sau:
     \item \textbf{Hai đòn bẩy tác động lên hai độ đo khác nhau.} \texttt{user\_conditioned}
     là đòn bẩy AUC (biến thiên giữa các người dùng); \texttt{align\_rank\_loss} là đòn bẩy
     uAUC (bảo toàn thứ tự trong người dùng). Việc bật theo từng tập dữ liệu là siêu tham số
-    hợp lệ theo domain.
+    hợp lệ theo miền.
 
     \item \textbf{Trần uAUC nằm ở MF teacher, không phải cầu nối.} Phân rã warm/cold cho
     thấy uAUC nhóm warm cao hơn hẳn nhóm cold trên cả hai tập dữ liệu (ví dụ Amazon-Book:
@@ -86,7 +86,7 @@ Từ các hạn chế và quan sát trên, luận văn đề xuất những hư�
 
 \textbf{Mở rộng thực nghiệm:}
 \begin{itemize}
-    \item Đánh giá trên Amazon Books và các tập dữ liệu ngoài domain phim để kiểm chứng
+    \item Đánh giá trên Amazon Books và các tập dữ liệu ngoài miền phim để kiểm chứng
     khả năng tổng quát.
     \item Chạy nhiều seed và báo cáo mean $\pm$ std để đánh giá độ ổn định.
 \end{itemize}
@@ -105,7 +105,7 @@ Từ các hạn chế và quan sát trên, luận văn đề xuất những hư�
     nhóm người dùng/vật phẩm nguội -- đòn bẩy được phân rã warm/cold chỉ ra là trần thực sự
     của uAUC.
     \item Mở rộng mục tiêu bảo toàn thứ tự (\texttt{align\_rank\_loss}, đã hiệu quả trên
-    Amazon-Book) sang các domain khác và khảo sát trọng số $\lambda$ tối ưu theo từng tập.
+    Amazon-Book) sang các miền khác và khảo sát trọng số $\lambda$ tối ưu theo từng tập.
 \end{itemize}
 
 \textbf{Mở rộng kiến trúc:}

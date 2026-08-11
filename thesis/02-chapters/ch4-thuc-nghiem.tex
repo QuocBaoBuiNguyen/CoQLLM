@@ -23,9 +23,9 @@ hóa thành nhãn CTR: $\geq 4$ sao được coi là nhấp (click), còn lại 
 \textbf{Amazon-Book}~\cite{cora2024} là một tập dữ liệu thưa hơn nhiều so với MovieLens-1M,
 theo đúng phân chia dùng trong CoLLM và CoRA. Tập này có khoảng $23$ nghìn người dùng và
 $34$ nghìn vật phẩm sách, với độ thưa và tỉ lệ người dùng/vật phẩm nguội cao hơn hẳn -- đây
-chính là điều kiện để kiểm chứng cầu nối CF--LLM trên domain khó, nơi tín hiệu CF yếu và
+chính là điều kiện để kiểm chứng cầu nối CF--LLM trên miền khó, nơi tín hiệu CF yếu và
 LLM/Q-Former có nhiều dư địa đóng góp. Nhãn CTR được nhị phân hóa tương tự. Việc bổ sung
-Amazon-Book cho phép đánh giá khả năng tổng quát của SigLLM ngoài domain phim và làm nổi
+Amazon-Book cho phép đánh giá khả năng tổng quát của SigLLM ngoài miền phim và làm nổi
 bật vai trò của mục tiêu bảo toàn thứ tự nội-người-dùng (Mục~\ref{ssec:align-rank}).
 
 \subsection{Phân chia dữ liệu và giao thức đánh giá}
@@ -183,7 +183,7 @@ lệch nằm trong biên độ nhiễu) -- đúng như phân tích ở Mục~\re
 theo người dùng chủ yếu nâng khả năng phân biệt \textit{giữa} các người dùng (AUC), gần như
 trung tính với xếp hạng \textit{trong} người dùng (uAUC).
 
-\textbf{Amazon-Book.} Đây là domain thưa và khó hơn. Với \texttt{user\_conditioned} (Run-1),
+\textbf{Amazon-Book.} Đây là miền thưa và khó hơn. Với \texttt{user\_conditioned} (Run-1),
 SigLLM đạt AUC $0{,}8147$ và uAUC $0{,}5958$ -- \textit{vượt cả CoLLM-MF và BinLLM (theo lần
 chạy lại của CoRA) trên cả hai độ đo}. Bổ sung \texttt{align\_rank\_loss} (Run-2) nâng uAUC
 lên $0{,}6062$ ($+0{,}0104$) trong khi AUC gần như đứng yên ($-0{,}0015$) -- đúng thiết kế:
@@ -256,7 +256,7 @@ tính với uAUC. Trên Amazon-Book, \texttt{align\_rank\_loss} là đòn bẩy 
 cơ chế khác nhau: trên MovieLens-1M uAUC đã gần bão hòa ($\approx 0{,}70$) nên
 \texttt{align\_rank\_loss} không còn dư địa; trên Amazon-Book uAUC còn thấp ($\approx 0{,}59$)
 nên tổn thất xếp hạng nội-người-dùng phát huy tác dụng. Việc bật cơ chế theo từng tập dữ
-liệu vì thế là một \textit{siêu tham số hợp lệ theo domain}, không phải sự bất nhất về
+liệu vì thế là một \textit{siêu tham số hợp lệ theo miền}, không phải sự bất nhất về
 phương pháp.
 
 \textbf{Các ablation chưa thực hiện.} Do giới hạn tài nguyên, một số ablation vẫn còn để
