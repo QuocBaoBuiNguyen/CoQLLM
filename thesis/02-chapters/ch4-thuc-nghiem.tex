@@ -187,11 +187,12 @@ trung tính với xếp hạng \textit{trong} người dùng (uAUC).
 SigLLM đạt AUC $0{,}8147$ và uAUC $0{,}5958$ -- \textit{vượt cả CoLLM-MF và BinLLM (theo lần
 chạy lại của CoRA) trên cả hai độ đo}. Bổ sung \texttt{align\_rank\_loss} (Run-2) nâng uAUC
 lên $0{,}6062$ ($+0{,}0104$) trong khi AUC gần như đứng yên ($-0{,}0015$) -- đúng thiết kế:
-tổn thất này tác động vào thứ tự nội-người-dùng chứ không đụng khả năng phân biệt cross-user.
+tổn thất này tác động vào thứ tự nội-người-dùng chứ không ảnh hưởng đến khả năng phân biệt
+giữa các người dùng.
 Con số $0{,}6062$ đưa SigLLM vào vùng cạnh tranh với CoRA-MF ($0{,}6262$), vốn dùng cơ chế
 tiêm trọng số khác hẳn.
 
-\textit{Lưu ý về giao thức so sánh.} SigLLM chọn checkpoint theo \textbf{uAUC}, còn
+\textit{Về giao thức so sánh.} SigLLM chọn checkpoint theo \textbf{uAUC}, còn
 CoLLM/CoRA theo \textbf{AUC}; do đó uAUC của SigLLM là uAUC-tối-ưu-trên-frontier (lợi thế
 nhẹ) và cần được đọc kèm khác biệt này. Trên Amazon-Book, số liệu CoLLM/BinLLM có sai khác
 đáng kể giữa các lần chạy lại trong tài liệu (uAUC dao động $\approx 0{,}57$--$0{,}63$ tùy
