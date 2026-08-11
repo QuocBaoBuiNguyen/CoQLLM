@@ -25,6 +25,35 @@
 
 ---
 
+## 0.5. ⚠️ MISMATCH LỚN: luận cũ viết theo hướng CoRA — PHẢI REALIGN TRƯỚC KHI ĐIỀN SỐ
+
+**Đây là việc quan trọng nhất — đọc trước khi làm bất cứ gì.** Luận hiện tại mô tả một kiến trúc **KHÁC** với nhánh SOTA thực tế. Nếu chỉ điền số vào một method sai thì luận sẽ mâu thuẫn với code/kết quả.
+
+### Luận cũ đang viết gì (SAI so với implementation SOTA)
+Mô tả SigLLM có **HAI đường song song** đưa CF vào LLM và đóng góp = "kết hợp cả hai":
+1. Đường **soft-token** (Q-Former Z → projection → soft token).
+2. Đường **tiêm trọng số CoRA (ΔW)** — sinh low-rank ΔW cộng vào `q_proj`/`v_proj` của LLM (Công thức `eq:cora-delta`, cổng tanh zero-init kiểu Flamingo).
+- Vị trí: ch2 §`ssec:cora-rel` (2.3.4) + bảng so sánh; ch3-moi §`ssec:hai-duong` + `eq:cora-delta` + §`ssec:on-dinh`; ch3-phuong-phap §`sec:cora`; bảng ablation ch4 (3 chế độ: chỉ-soft / chỉ-ΔW / cả-hai); ch5 §future-work.
+- Ký hiệu placeholder cũ `<CFTokens>` cũng **stale** (code thật dùng `<rec_soft_token>` + `<ItemIDList>`/`<TargetItemID>`).
+
+### Nhánh SOTA thực tế làm gì (đã verify trong code)
+- **CHỈ đường soft-token** (`qformer_rec_llm.py` dòng ~828-830: scatter CF embedding vào `inputs_embeds`). **KHÔNG có CoRA ΔW** — không có gate/tanh/P_down/P_up/delta trong model; config chỉ có `ablate_soft_tokens`, **không có toggle tiêm trọng số**.
+- **THÊM 2 đòn bẩy mà luận cũ CHƯA nhắc:** `user_conditioned` (query-shift, lever AUC) + `align_rank_loss` (BPR per-user trên CF token, lever uAUC book). Xem mục 1.B.
+- Số SOTA báo cáo (ML-1M 0.7475/0.6968, book 0.8132/0.6062) đến từ **soft-token + user_conditioned (+ align_rank cho book)**, **KHÔNG dùng CoRA ΔW**.
+
+### Việc realign (giao cho `/ars-revision`) — QUYẾT ĐỊNH của bạn ở 1 điểm
+1. **Gỡ / hạ cấp đường CoRA ΔW** khỏi phần method vì nó không nằm trong model tạo ra số. **Chọn 1 (bạn quyết trong session viết):**
+   - **(a) Bỏ hẳn** đường ΔW khỏi ch3 method, mô tả đúng model thực = soft-token bridge. Chuyển CoRA về ch2 (related work) như *một hướng khác*, và/hoặc ch5 future-work. → *Sạch nhất, method khớp code 100%.* **Khuyến nghị.**
+   - **(b) Giữ như "đã khảo sát / future work"** nhưng nói RÕ số SOTA là từ cấu hình soft-token-only + user_conditioned + align_rank, ΔW không bật. → giữ công sức đã viết nhưng phải tách bạch tuyệt đối.
+2. **Thêm 2 mục method mới:** `user_conditioned` + `align_rank_loss` (vật liệu mục 1.B) — đây mới là đóng góp thật của nhánh SOTA.
+3. **Viết lại bảng ablation ch4** (`tab:ablation`): thay 3-chế-độ-CoRA cũ bằng ablation THẬT khớp code: `vanilla Q-Former → +user_conditioned → +align_rank` (+ hàng attention-MLP P1.4 nếu train được).
+4. **Sửa ký hiệu** `<CFTokens>` → `<rec_soft_token>`/`<ItemIDList>`+`<TargetItemID>` xuyên suốt.
+5. Rà `references.bib`: `cite{cora2024}` vẫn giữ (CoRA là related work + baseline CoRA-MF), nhưng bỏ vai trò "cơ chế lõi của SigLLM".
+
+> Lưu ý lịch sử: từng có một bản "improvement bundle" tích hợp CoRA (uAUC ~0.7041). **Nhánh canonical cho luận giờ là v2/v2-book — KHÔNG CoRA** (Vicuna, CoLLM-faithful, vượt BinLLM cả 2 metric dưới protocol công bằng). Đừng trộn số của 2 hướng.
+
+---
+
 ## 1. NHỮNG THAY ĐỔI KIẾN TRÚC TRONG NHÁNH (vật liệu cho báo cáo kiến trúc)
 
 Đây là các **đóng góp so với vanilla Q-Former** (mỗi mục kèm file + ý nghĩa). Nhóm theo vai trò.
@@ -103,9 +132,9 @@ Mở session mới, nói rõ với Claude:
 
 ### Bước 2 — `/ars-revision` (mode: revision) — cốt lõi
 Trigger: *"revise paper", "incorporate reviewer feedback"*. Output: bản revised + point-by-point R&R.
-Giao cho nó:
-1. **P0.1** — điền `tab:ket-qua-chinh` (số ở mục 2) + viết phân tích §5.2. **KHÔNG chỉnh claim hồi tố** — báo cáo trung thực (ta vượt cả 2 metric ML-1M; book vượt CoLLM-MF/BinLLM CoRA-protocol).
-2. **Bổ sung mô tả kiến trúc** vào ch3: thêm `user_conditioned` (§ssec:hai-duong / sec:qformer) và `align_rank_loss` (nối §rank-preserving có sẵn ở ch3-phuong-phap). Vật liệu ở **mục 1.B**.
+Giao cho nó theo THỨ TỰ (realign method TRƯỚC, rồi mới điền số — điền số vào method sai là vô nghĩa):
+1. **REALIGN METHOD khỏi CoRA (mục 0.5) — LÀM ĐẦU TIÊN.** Gỡ/hạ cấp đường ΔW; thêm `user_conditioned` + `align_rank_loss` vào ch3; viết lại ablation; sửa `<CFTokens>`. Xác nhận lựa chọn (a) hay (b) ở mục 0.5 với người dùng trước khi sửa.
+2. **P0.1** — điền `tab:ket-qua-chinh` (số ở mục 2) + viết phân tích §5.2. **KHÔNG chỉnh claim hồi tố** — báo cáo trung thực (ta vượt cả 2 metric ML-1M; book vượt CoLLM-MF/BinLLM CoRA-protocol).
 3. **P2.3** — viết §ssec:user-group bằng phân rã **warm/cold** (mục 1.E).
 4. **§4.3 nghịch lý AUC/uAUC** — củng cố bằng warm 0.624 / cold 0.526.
 
@@ -143,6 +172,9 @@ Mình muốn cập nhật luận văn /thesis bằng skill ARS.
 docs/tong-ket-findings-va-ket-qua.md (kết quả chi tiết),
 thesis/01-plan/revision-roadmap.md (roadmap review).
 Nhánh SOTA: feat/user-conditioned-queries-v2-book (book) / feat/user-conditioned-queries-v2 (movie).
-Bắt đầu bằng /ars-revision để đóng P0.1 (điền bảng kết quả + §5.2) và bổ sung mô tả
-user_conditioned + align_rank_loss vào ch3.
+
+QUAN TRỌNG: luận cũ viết method theo hướng CoRA (đường tiêm trọng số ΔW), NHƯNG
+code nhánh SOTA chỉ dùng soft-token + user_conditioned + align_rank, KHÔNG có CoRA ΔW
+(xem mục 0.5 của doc). Bắt đầu /ars-revision bằng việc REALIGN method khỏi CoRA
+(hỏi mình chọn phương án (a) bỏ hẳn hay (b) giữ như future-work), rồi mới điền số P0.1.
 ```
