@@ -41,10 +41,14 @@ Mô tả SigLLM có **HAI đường song song** đưa CF vào LLM và đóng gó
 - **THÊM 2 đòn bẩy mà luận cũ CHƯA nhắc:** `user_conditioned` (query-shift, lever AUC) + `align_rank_loss` (BPR per-user trên CF token, lever uAUC book). Xem mục 1.B.
 - Số SOTA báo cáo (ML-1M 0.7475/0.6968, book 0.8132/0.6062) đến từ **soft-token + user_conditioned (+ align_rank cho book)**, **KHÔNG dùng CoRA ΔW**.
 
-### Việc realign (giao cho `/ars-revision`) — QUYẾT ĐỊNH của bạn ở 1 điểm
-1. **Gỡ / hạ cấp đường CoRA ΔW** khỏi phần method vì nó không nằm trong model tạo ra số. **Chọn 1 (bạn quyết trong session viết):**
-   - **(a) Bỏ hẳn** đường ΔW khỏi ch3 method, mô tả đúng model thực = soft-token bridge. Chuyển CoRA về ch2 (related work) như *một hướng khác*, và/hoặc ch5 future-work. → *Sạch nhất, method khớp code 100%.* **Khuyến nghị.**
-   - **(b) Giữ như "đã khảo sát / future work"** nhưng nói RÕ số SOTA là từ cấu hình soft-token-only + user_conditioned + align_rank, ΔW không bật. → giữ công sức đã viết nhưng phải tách bạch tuyệt đối.
+### Việc realign (giao cho `/ars-revision`) — ĐÃ CHỐT PHƯƠNG ÁN (a)
+1. **✅ ĐÃ QUYẾT: Phương án (a) — BỎ HẲN đường CoRA ΔW khỏi phần method.** (Người dùng chốt 2026-08-11.) Mô tả đúng model thực = **chỉ soft-token bridge**. Cụ thể:
+   - **ch3-moi §`ssec:hai-duong`:** bỏ "Đường tiêm trọng số", `eq:cora-delta`, và §`ssec:on-dinh` (4 kỹ thuật ổn định cho ΔW — không còn liên quan). Đổi tiêu đề mục từ "Hai đường đưa tín hiệu CF" → mô tả 1 đường soft-token.
+   - **ch3-phuong-phap §`sec:cora`:** bỏ nguyên mục; sửa các tham chiếu `\ref{sec:cora}`.
+   - **ch2 §`ssec:cora-rel` (2.3.4):** GIỮ CoRA nhưng chỉ như **related work / một hướng khác** (tiêm trọng số) + là **baseline CoRA-MF**. Bỏ câu "SigLLM hiện thực cơ chế CoRA như một trong hai đường".
+   - **ch5:** bỏ future-work "kết hợp CoRA + soft-token"; nếu muốn có thể để CoRA ΔW như một hướng mở *chưa hiện thực*.
+   - **Bảng ablation:** bỏ 3-chế-độ {soft/ΔW/cả-hai}.
+   - Giữ `cite{cora2024}` (related work + baseline), bỏ vai trò "cơ chế lõi".
 2. **Thêm 2 mục method mới:** `user_conditioned` + `align_rank_loss` (vật liệu mục 1.B) — đây mới là đóng góp thật của nhánh SOTA.
 3. **Viết lại bảng ablation ch4** (`tab:ablation`): thay 3-chế-độ-CoRA cũ bằng ablation THẬT khớp code: `vanilla Q-Former → +user_conditioned → +align_rank` (+ hàng attention-MLP P1.4 nếu train được).
 4. **Sửa ký hiệu** `<CFTokens>` → `<rec_soft_token>`/`<ItemIDList>`+`<TargetItemID>` xuyên suốt.
@@ -133,7 +137,7 @@ Mở session mới, nói rõ với Claude:
 ### Bước 2 — `/ars-revision` (mode: revision) — cốt lõi
 Trigger: *"revise paper", "incorporate reviewer feedback"*. Output: bản revised + point-by-point R&R.
 Giao cho nó theo THỨ TỰ (realign method TRƯỚC, rồi mới điền số — điền số vào method sai là vô nghĩa):
-1. **REALIGN METHOD khỏi CoRA (mục 0.5) — LÀM ĐẦU TIÊN.** Gỡ/hạ cấp đường ΔW; thêm `user_conditioned` + `align_rank_loss` vào ch3; viết lại ablation; sửa `<CFTokens>`. Xác nhận lựa chọn (a) hay (b) ở mục 0.5 với người dùng trước khi sửa.
+1. **REALIGN METHOD khỏi CoRA (mục 0.5) — LÀM ĐẦU TIÊN. Phương án ĐÃ CHỐT = (a) bỏ hẳn ΔW.** Gỡ đường ΔW + `eq:cora-delta` + §on-dinh (ch3), bỏ §sec:cora (ch3-phuong-phap), hạ CoRA về related-work/baseline (ch2), bỏ ablation 3-chế-độ; thêm `user_conditioned` + `align_rank_loss` vào ch3; sửa `<CFTokens>`. (Không cần hỏi lại (a)/(b).)
 2. **P0.1** — điền `tab:ket-qua-chinh` (số ở mục 2) + viết phân tích §5.2. **KHÔNG chỉnh claim hồi tố** — báo cáo trung thực (ta vượt cả 2 metric ML-1M; book vượt CoLLM-MF/BinLLM CoRA-protocol).
 3. **P2.3** — viết §ssec:user-group bằng phân rã **warm/cold** (mục 1.E).
 4. **§4.3 nghịch lý AUC/uAUC** — củng cố bằng warm 0.624 / cold 0.526.
@@ -175,6 +179,6 @@ Nhánh SOTA: feat/user-conditioned-queries-v2-book (book) / feat/user-conditione
 
 QUAN TRỌNG: luận cũ viết method theo hướng CoRA (đường tiêm trọng số ΔW), NHƯNG
 code nhánh SOTA chỉ dùng soft-token + user_conditioned + align_rank, KHÔNG có CoRA ΔW
-(xem mục 0.5 của doc). Bắt đầu /ars-revision bằng việc REALIGN method khỏi CoRA
-(hỏi mình chọn phương án (a) bỏ hẳn hay (b) giữ như future-work), rồi mới điền số P0.1.
+(xem mục 0.5 của doc). ĐÃ CHỐT phương án (a): BỎ HẲN CoRA ΔW khỏi method.
+Bắt đầu /ars-revision bằng việc REALIGN method khỏi CoRA theo (a), rồi mới điền số P0.1.
 ```
