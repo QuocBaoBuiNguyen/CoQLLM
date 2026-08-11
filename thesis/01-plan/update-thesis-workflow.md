@@ -60,7 +60,7 @@ Mô tả SigLLM có **HAI đường song song** đưa CF vào LLM và đóng gó
 
 ## 0.6. ⚠️ MISMATCH #2: bỏ InstructBLIP — reframe thành PLAIN BLIP-2 Q-Former (ĐÃ CHỐT)
 
-**Người dùng chốt 2026-08-11: bỏ InstructBLIP khỏi luận, mô tả cầu nối là PLAIN Q-Former (BLIP-2). GIỮ SỐ CŨ (chưa train lại); dự định train lại bản plain Q-Former sau.**
+**Người dùng chốt 2026-08-11: THỐNG NHẤT mô tả cầu nối là PLAIN Q-Former (BLIP-2) trong TOÀN luận — kể cả khi code thực tế chạy module InstructBLIP với instruction cố định. Bỏ mọi phần InstructBLIP. GIỮ SỐ CŨ (chưa train lại); dự định train lại bản plain Q-Former sau để code khớp narrative. (Hợp lệ vì instruction cố định ⇒ chức năng ≈ BLIP-2, không mang tín hiệu per-sample.)**
 
 ### Lý do (đã verify code)
 - Q-Former ở Stage-3 CÓ nhận instruction (`qformer_rec_llm.py:673`), NHƯNG instruction là **chuỗi task CỐ ĐỊNH** (`QFORMER_ITEM_INSTRUCTIONS`, `_build_qformer_instructions`): train chọn ngẫu nhiên 1/12 paraphrase, **eval luôn dùng `[0]`**; 12 câu là **mô tả task chung**, KHÔNG chứa title/genre thật của item.
