@@ -52,7 +52,7 @@ mất thông tin hoặc tăng chi phí tính toán đáng kể. Đây là trở 
 nhận trong nhiều công trình LLMs-as-RS~\cite{collm2023}.
 
 Giải pháp tự nhiên là biểu diễn thông tin hành vi dưới dạng \textit{véc-tơ đặc trưng
-compact}: thay vì liệt kê từng vật phẩm, ta dùng nhúng CF -- tổng hợp từ toàn bộ lịch
+gọn (compact)}: thay vì liệt kê từng vật phẩm, ta dùng nhúng CF -- tổng hợp từ toàn bộ lịch
 sử tương tác -- để nén tín hiệu cộng tác thành một véc-tơ dày đặc. Véc-tơ này sau đó
 được đưa vào LLM như một \textit{soft token}, bổ sung tín hiệu hành vi mà không làm dài
 ngữ cảnh. Cách tiếp cận này được gọi là \textit{tích hợp CF vào LLM qua không gian véc-tơ}.
@@ -69,7 +69,7 @@ cảnh hiện tại.
 Khoảng cách ngữ nghĩa giữa không gian biểu diễn CF (học từ tín hiệu tương tác nhị phân)
 và không gian ngữ nghĩa của LLM (học từ ngôn ngữ tự nhiên) là một thách thức căn bản.
 Hai không gian này có nguồn gốc huấn luyện hoàn toàn khác nhau, nên một phép chiếu đơn
-giản khó có thể thực hiện việc \textit{căn chỉnh} (alignment) hiệu quả. Điều này đặt ra
+giản khó có thể \textit{căn chỉnh} (alignment) hiệu quả. Điều này đặt ra
 câu hỏi: liệu có cơ chế nối cầu nào mạnh hơn lớp chiếu tuyến tính, có khả năng căn chỉnh
 tín hiệu CF vào không gian ngữ nghĩa LLM một cách có kiểm soát và linh hoạt hơn?
 
@@ -149,10 +149,10 @@ Từ hai mục tiêu trên, luận văn đóng góp:
     tích ablation về đóng góp của từng đòn bẩy và phân rã warm/cold làm rõ trần uAUC.
 \end{enumerate}
 
-\textit{Lưu ý về tư thế viết:} Luận văn áp dụng tư thế thực nghiệm trung thực (posture
-A): báo cáo số liệu thực tế, phân tích nguyên nhân khi kết quả không như kỳ vọng, và
-không phóng đại claim vượt quá bằng chứng. Các kết quả chính được trình bày với đầy đủ
-caveat về giới hạn thực nghiệm (một seed, một số ablation thành phần còn để ngỏ).
+\textit{Về quan điểm trình bày kết quả:} Luận văn tuân thủ nguyên tắc thực nghiệm trung
+thực: báo cáo số liệu thực tế, phân tích nguyên nhân khi kết quả không như kỳ vọng, và
+không phóng đại kết luận vượt quá bằng chứng. Các kết quả chính được trình bày kèm đầy đủ
+lưu ý về giới hạn thực nghiệm (một seed, một số ablation thành phần còn để ngỏ).
 
 \section{Bố cục luận văn}
 \label{sec:bo-cuc}
