@@ -21,7 +21,7 @@
   - **P1.4 (Major):** thêm hàng ablation "attention-MLP projector" (cần train thêm — xem mục 5).
   - **P2.3 (Moderate):** phân tích active vs sparse user → **giờ đã có = warm vs cold** (mục 3.E).
 - Chương: `thesis/02-chapters/ch{1..5}-*.tex`. LaTeX template HCMUS/FIT ở `thesis/00-format/Thesis_Template`.
-- ⚠️ Có **2 file ch3**: `ch3-moi-phuong-phap.tex` (bản mới, 386 dòng, đang dùng) và `ch3-phuong-phap.tex` (bản cũ). Xác nhận bản nào được `\input` trong main trước khi sửa.
+- ✅ Chỉ còn **1 file ch3**: `ch3-phuong-phap.tex` (đã hợp nhất, `\input` trong `main_draft.tex`). Bản trùng `ch3-moi-phuong-phap.tex` đã xoá (commit `aff0198`).
 
 ---
 
