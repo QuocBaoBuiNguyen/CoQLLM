@@ -58,6 +58,33 @@ Mô tả SigLLM có **HAI đường song song** đưa CF vào LLM và đóng gó
 
 ---
 
+## 0.6. ⚠️ MISMATCH #2: bỏ InstructBLIP — reframe thành PLAIN BLIP-2 Q-Former (ĐÃ CHỐT)
+
+**Người dùng chốt 2026-08-11: bỏ InstructBLIP khỏi luận, mô tả cầu nối là PLAIN Q-Former (BLIP-2). GIỮ SỐ CŨ (chưa train lại); dự định train lại bản plain Q-Former sau.**
+
+### Lý do (đã verify code)
+- Q-Former ở Stage-3 CÓ nhận instruction (`qformer_rec_llm.py:673`), NHƯNG instruction là **chuỗi task CỐ ĐỊNH** (`QFORMER_ITEM_INSTRUCTIONS`, `_build_qformer_instructions`): train chọn ngẫu nhiên 1/12 paraphrase, **eval luôn dùng `[0]`**; 12 câu là **mô tả task chung**, KHÔNG chứa title/genre thật của item.
+- → Đặc trưng định danh của InstructBLIP (**instruction conditioning theo mẫu**) **bị vô hiệu** (instruction hằng số ⇒ không mang tín hiệu phân biệt). Instruction cố định chỉ còn vai trò: (a) augmentation nhẹ khi train, (b) **mỏ neo phân phối** để khớp text Stage-1 (bỏ hẳn → OOD). KHÔNG phải đóng góp.
+- → Mô tả "tăng cường InstructBLIP" là **overclaim** (chính là P2.2 mà Devil's Advocate flag). Cái làm query THẬT SỰ phụ thuộc input là **`user_conditioned`**, không phải instruction.
+
+### Về việc GIỮ SỐ CŨ (quan trọng cho tính trung thực)
+- Code hiện chạy = module **HF InstructBLIP Q-Former** nhưng với instruction cố định ⇒ **về mặt chức năng ≈ BLIP-2 Q-Former + task-token cố định**. Nên mô tả là "plain Q-Former" **với số cũ là chấp nhận được** (instruction không mang tín hiệu per-sample).
+- ⏳ **Kế hoạch:** train lại bản **plain Q-Former** (bỏ hẳn nhánh instruction-text) để code khớp 100% với narrative. Khi có số mới → cập nhật; nếu số đổi không đáng kể thì giữ nguyên kết luận. **Chưa làm bây giờ.**
+
+### Việc bỏ InstructBLIP (giao cho `/ars-revision`, song song mục 0.5)
+1. **ch3 `sec:instructblip-aug` (§ Tăng cường Q-Former theo InstructBLIP + 3 tiểu mục co-che/thich-nghi/ket-qua): XOÁ nguyên section.** Sửa `\ref{sec:instructblip-aug}` (ch3 dòng ~14, ch2 dòng ~303).
+2. **ch3 §3.3.1 (dòng ~112-138):** đổi "Q-Former theo InstructBLIP" → **"Q-Former (BLIP-2)"**; bỏ ý "self-attention với token chỉ dẫn"; **bỏ đoạn "Quan sát vai trò thay đổi giữa hai miền" + "đa dạng hóa chỉ dẫn có tác dụng"** (dòng 131-138 — đó là lập luận instruction-conditioning).
+3. **ch2 `ssec:instructblip` (dòng 286-303): XOÁ** (hoặc rút còn 1 câu trong nền BLIP-2). Bỏ InstructBLIP ở bảng so sánh (dòng 236) và các câu "chưa tăng cường InstructBLIP / conditioning theo chỉ dẫn" (212, 331). **GIỮ nền BLIP-2/Q-Former.**
+4. **ch1 (dòng 80, 99, 108, 128, 143, 166, 171): bỏ InstructBLIP như "hướng tăng cường".** Đóng góp query-conditioning = **`user_conditioned`**, không phải InstructBLIP.
+5. **GIỮ NGUYÊN** `ssec:backbone-instruct` (ch3 § "Backbone LLM đã tinh chỉnh theo chỉ dẫn") — đây nói về **Vicuna là LLM instruction-tuned**, KHÁC hoàn toàn InstructBLIP Q-Former. Đừng đụng.
+6. **references.bib:** sau khi bỏ, nếu `cite{instructblip2023}` không còn chỗ dùng → xoá entry; nếu còn giữ 1 câu nền BLIP-2 thì để lại. Chạy `/ars-citation-check` để bắt ref mồ côi.
+7. **Ablation:** bỏ mọi hàng/ghi chú "varied vs fixed instruction"; nếu muốn, để 1 câu footnote "đã thử instruction biến thiên, không cải thiện".
+
+### Method SẠCH sau cả 0.5 + 0.6
+`MF teacher → cầu nối **plain Q-Former (BLIP-2)** (learned queries + cross-attention vào CF, chỉ soft-token) → **user_conditioned** (lever AUC) → **align_rank_loss** (lever uAUC book)`. Không CoRA ΔW, không InstructBLIP.
+
+---
+
 ## 1. NHỮNG THAY ĐỔI KIẾN TRÚC TRONG NHÁNH (vật liệu cho báo cáo kiến trúc)
 
 Đây là các **đóng góp so với vanilla Q-Former** (mỗi mục kèm file + ý nghĩa). Nhóm theo vai trò.
@@ -68,7 +95,7 @@ Mô tả SigLLM có **HAI đường song song** đưa CF vào LLM và đóng gó
   - *Stage-1 biểu diễn* (`train_qformer_stage1_representation.py`): BLIP-2 ITC+ITM+ITG **+ item–item (ii) + user–item (ui) contrastive** (bổ sung riêng cho gợi ý, commit 120f8b6).
   - *Stage-2 sinh* (`train_qformer_stage2_generative.py`): tiền huấn luyện caption kiểu BLIP-2, **LLM đóng băng**.
   - *Stage-3 hai bước* (`..._step1_lora.py` / `..._step2_cie.py`): **Step-1** train LoRA trên prompt text-only (không CF); **Step-2 (CIE)** mở Q-Former+projection, **đóng băng LoRA** → tách bạch "ngôn ngữ" (LoRA) và "collaborative" (Q-Former/proj).
-- **HFQFormerAdapter** (`src/sigllm/models/q_former/hf_qformer_adapter.py`, commit 14d8599, b0d61db): Q-Former InstructBLIP, text branch khởi tạo từ **bert-base-uncased**, `num_layers=4` (giảm 8→4, commit cfd6418), `num_queries=8`, `d_model=768`.
+- **HFQFormerAdapter** (`src/sigllm/models/q_former/hf_qformer_adapter.py`, commit 14d8599, b0d61db): cầu nối **plain Q-Former (BLIP-2)** — learned queries + cross-attention vào CF. ⚠️ Code hiện *instantiate* module HF InstructBLIP Q-Former nhưng chạy với **instruction cố định** ⇒ về chức năng = BLIP-2 Q-Former (xem mục 0.6 — luận mô tả là plain Q-Former, KHÔNG InstructBLIP). text branch khởi tạo từ **bert-base-uncased**, `num_layers=4` (giảm 8→4, commit cfd6418), `num_queries=8`, `d_model=768`.
 - **Tiêm soft-token** (`qformer_rec_llm.py`, commit 9fa64b3, b01c13e): token chuyên dụng **`<rec_soft_token>`** (id 32000) thay `<unk>` để tránh va chạm OOV/pad; scatter embedding CF vào chuỗi input LLM. LayerNorm ở projection để chuẩn hoá scale soft-token (ee48751, 0b5536a).
 
 ### B. ĐÓNG GÓP SOTA (các "đòn bẩy" tạo ra kết quả vượt baseline) — TRỌNG TÂM báo cáo
@@ -137,7 +164,10 @@ Mở session mới, nói rõ với Claude:
 ### Bước 2 — `/ars-revision` (mode: revision) — cốt lõi
 Trigger: *"revise paper", "incorporate reviewer feedback"*. Output: bản revised + point-by-point R&R.
 Giao cho nó theo THỨ TỰ (realign method TRƯỚC, rồi mới điền số — điền số vào method sai là vô nghĩa):
-1. **REALIGN METHOD khỏi CoRA (mục 0.5) — LÀM ĐẦU TIÊN. Phương án ĐÃ CHỐT = (a) bỏ hẳn ΔW.** Gỡ đường ΔW + `eq:cora-delta` + §on-dinh (ch3), bỏ §sec:cora (ch3-phuong-phap), hạ CoRA về related-work/baseline (ch2), bỏ ablation 3-chế-độ; thêm `user_conditioned` + `align_rank_loss` vào ch3; sửa `<CFTokens>`. (Không cần hỏi lại (a)/(b).)
+1. **REALIGN METHOD — LÀM ĐẦU TIÊN (2 việc song song):**
+   - **(0.5) Bỏ CoRA ΔW** (phương án (a) đã chốt): gỡ đường ΔW + `eq:cora-delta` + §on-dinh, bỏ §sec:cora, hạ CoRA về related-work/baseline (ch2), bỏ ablation 3-chế-độ; sửa `<CFTokens>`.
+   - **(0.6) Bỏ InstructBLIP** (đã chốt): xoá `sec:instructblip-aug` (ch3) + `ssec:instructblip` (ch2), đổi "Q-Former theo InstructBLIP" → "plain Q-Former (BLIP-2)", bỏ InstructBLIP khỏi ch1 + bảng so sánh; GIỮ `ssec:backbone-instruct` (Vicuna). Giữ số cũ.
+   - Rồi **thêm 2 mục method mới:** `user_conditioned` + `align_rank_loss` (mục 1.B) — đây mới là đóng góp thật.
 2. **P0.1** — điền `tab:ket-qua-chinh` (số ở mục 2) + viết phân tích §5.2. **KHÔNG chỉnh claim hồi tố** — báo cáo trung thực (ta vượt cả 2 metric ML-1M; book vượt CoLLM-MF/BinLLM CoRA-protocol).
 3. **P2.3** — viết §ssec:user-group bằng phân rã **warm/cold** (mục 1.E).
 4. **§4.3 nghịch lý AUC/uAUC** — củng cố bằng warm 0.624 / cold 0.526.
@@ -158,12 +188,15 @@ Cập nhật abstract song ngữ với số mới nếu cần.
 ---
 
 ## 4. MAPPING: roadmap item → giờ đóng được gì
-| Roadmap | Cần gì | Trạng thái |
+| Roadmap / việc | Cần gì | Trạng thái |
 |---|---|---|
+| **Realign 0.5** bỏ CoRA ΔW | sửa prose (viết) | ✅ đã chốt (a) → `/ars-revision` |
+| **Realign 0.6** bỏ InstructBLIP → plain Q-Former | sửa prose (viết) | ✅ đã chốt, giữ số cũ → `/ars-revision` |
 | **P0.1** điền bảng + §5.2 | số thực | ✅ có (mục 2) → `/ars-revision` |
 | **P2.3** active vs sparse | phân tích nhóm user | ✅ có = warm/cold (mục 1.E) |
 | **§4.3** nghịch lý AUC/uAUC | bằng chứng | ✅ warm 0.624 / cold 0.526 |
 | **P1.4** ablation attention-MLP | train thêm 1 lượt | ⏳ chưa — session train |
+| Train lại **plain Q-Former** (bỏ instruction-text) | train lại pipeline | ⏳ dự định — để code khớp narrative 0.6; giữ số cũ tới khi có |
 | P2.4 justify LoRA r=8 | note ngắn | ⏳ tuỳ |
 | Multi-seed | train nhiều seed | ⏳ hạn chế đã thừa nhận |
 
@@ -177,8 +210,9 @@ docs/tong-ket-findings-va-ket-qua.md (kết quả chi tiết),
 thesis/01-plan/revision-roadmap.md (roadmap review).
 Nhánh SOTA: feat/user-conditioned-queries-v2-book (book) / feat/user-conditioned-queries-v2 (movie).
 
-QUAN TRỌNG: luận cũ viết method theo hướng CoRA (đường tiêm trọng số ΔW), NHƯNG
-code nhánh SOTA chỉ dùng soft-token + user_conditioned + align_rank, KHÔNG có CoRA ΔW
-(xem mục 0.5 của doc). ĐÃ CHỐT phương án (a): BỎ HẲN CoRA ΔW khỏi method.
-Bắt đầu /ars-revision bằng việc REALIGN method khỏi CoRA theo (a), rồi mới điền số P0.1.
+QUAN TRỌNG — method cũ SAI ở 2 chỗ, phải realign TRƯỚC khi điền số:
+- (mục 0.5) Bỏ hẳn CoRA ΔW — code chỉ dùng soft-token, không có tiêm trọng số. (đã chốt (a))
+- (mục 0.6) Bỏ InstructBLIP — instruction thực tế là cố định ⇒ mô tả là plain Q-Former (BLIP-2). GIỮ SỐ CŨ.
+Method đúng = MF → plain Q-Former (soft-token) → user_conditioned → align_rank.
+Bắt đầu /ars-revision bằng REALIGN (0.5 + 0.6), rồi mới điền số P0.1.
 ```
