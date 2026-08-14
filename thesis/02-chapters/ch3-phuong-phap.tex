@@ -158,7 +158,7 @@ số bên trong của LLM.
 LLM hoàn toàn đông cứng, tránh chi phí và rủi ro bất ổn của việc sinh trọng số theo từng
 mẫu, đồng thời tập trung toàn bộ dung lượng học vào cầu nối căn chỉnh. Trên nền đường soft
 token, luận văn bổ sung hai đòn bẩy huấn luyện -- điều kiện hóa truy vấn theo người dùng
-(Mục~\ref{ssec:user-conditioned}) và mục tiêu bảo toàn thứ tự nội-người-dùng
+(Mục~\ref{ssec:user-conditioned}) và mục tiêu bảo toàn thứ tự trong từng người dùng
 (Mục~\ref{ssec:align-rank}) -- nhằm cải thiện lần lượt AUC và uAUC.
 
 \subsection{Điều kiện hóa truy vấn theo người dùng}
@@ -184,7 +184,7 @@ trong khi gần như trung tính với uAUC, vốn bất biến với dịch chu
 người dùng. Vì $g_u$ chỉ xuất hiện khi bật cờ và được khởi tạo bằng không, cơ chế tương
 thích với checkpoint cũ và chỉ cần huấn luyện lại Bước 2 của Giai đoạn 3.
 
-\subsection{Mục tiêu bảo toàn thứ tự nội-người-dùng}
+\subsection{Hàm mất mát bảo toàn thứ tự trong từng người dùng}
 \label{ssec:align-rank}
 
 Hàm mất mát mặc định của Giai đoạn 3 là entropy chéo nhị phân (BCE) trên token
@@ -205,14 +205,14 @@ trong đó $s_u(\cdot)$ là điểm xếp hạng do \texttt{align\_rank\_head} s
 đã căn chỉnh, $\mathcal{P}_u$ là tập các cặp dương--âm của cùng người dùng $u$, $\sigma$ là
 hàm sigmoid, $\tau$ là nhiệt độ và $\lambda$ là trọng số. Việc áp mục tiêu này lên chính
 phần biểu diễn CF đã căn chỉnh (thay vì chỉ lên biên độ Yes/No của LLM) buộc bản thân cầu
-nối giữ đúng thứ tự nội-người-dùng.
+nối giữ đúng thứ tự trong từng người dùng.
 
 Để mỗi lô có sẵn các cặp dương--âm của cùng một người dùng, tổn thất này yêu cầu chế độ lấy
 mẫu theo nhóm người dùng (\textit{user-grouped batch}), và được kích hoạt ở Bước 2 của Giai
 đoạn 3 (nơi Q-Former và lớp chiếu được huấn luyện). Do \texttt{align\_rank\_head} khởi tạo
 bằng không, các epoch đầu gần như trung tính và tác dụng hiện dần về sau -- một đặc điểm
 huấn luyện được phân tích ở Chương~\ref{Chapter4}. Đây là một siêu tham số phụ thuộc tập dữ
-liệu: nó cải thiện uAUC trên tập còn nhiều dư địa xếp hạng nội-người-dùng (Amazon-Book) và
+liệu: nó cải thiện uAUC trên tập còn nhiều dư địa xếp hạng trong từng người dùng (Amazon-Book) và
 gần như trung tính khi uAUC đã bão hòa (MovieLens-1M).
 
 \section{Các lựa chọn thiết kế}
@@ -266,7 +266,7 @@ cho cả hai lớp mới.
 \section{Quy trình huấn luyện ba giai đoạn}
 \label{sec:ba-giai-doan}
 
-SigLLM được huấn luyện qua ba giai đoạn nối tiếp, theo giao thức của CoLLM~\cite{collm2023}
+SigLLM được huấn luyện qua ba giai đoạn nối tiếp, theo quy trình của CoLLM~\cite{collm2023}
 với điều chỉnh cho phù hợp với kiến trúc Q-Former.
 
 \subsection{Giai đoạn 1: Tiền huấn luyện biểu diễn}
@@ -336,7 +336,7 @@ gian ngữ nghĩa của LLM đông cứng.
 \subsection{Giai đoạn 3: Tinh chỉnh CTR}
 \label{ssec:stage3}
 
-Giai đoạn này theo giao thức hai bước của CoLLM~\cite{collm2023}:
+Giai đoạn này theo quy trình hai bước của CoLLM~\cite{collm2023}:
 
 \textbf{Bước 1}: Huấn luyện LoRA cơ sở với chỉ dẫn chỉ gồm văn bản (tên phim, thể loại,
 lịch sử dưới dạng văn bản), không có tín hiệu CF. Bước này thiết lập đường cơ sở cho
@@ -365,6 +365,6 @@ lớp chiếu tuyến tính của CoLLM. Luận điểm cốt lõi là: cơ ch�
 truy vấn học được cho phép căn chỉnh tín hiệu CF vào không gian ngữ nghĩa LLM có kiểm
 soát hơn, vượt qua giới hạn của giả thiết tuyến tính. Trên nền cầu nối soft token, hai
 đòn bẩy huấn luyện -- điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự
-nội-người-dùng -- cải thiện lần lượt AUC và uAUC. Các lựa chọn thiết kế bổ sung (đa token,
+trong từng người dùng -- cải thiện lần lượt AUC và uAUC. Các lựa chọn thiết kế bổ sung (đa token,
 backbone đã tinh chỉnh chỉ dẫn, tách projector) được trình bày như các thành phần đã khảo
 sát, với kết quả thực nghiệm ở Chương~\ref{Chapter4}.

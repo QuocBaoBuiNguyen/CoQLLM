@@ -15,12 +15,12 @@ SigLLM thay thế lớp MLP một lớp của CoLLM bằng kiến trúc Q-Former
 (nhúng người dùng, vật phẩm mục tiêu, lịch sử) thay thế đặc trưng ảnh làm đầu vào
 cross-attention và được đưa vào LLM qua đường soft token. Trên nền đó, luận văn bổ sung hai
 đòn bẩy huấn luyện -- điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự
-nội-người-dùng -- cùng các lựa chọn thiết kế (biểu diễn đa token, backbone đã tinh chỉnh chỉ
-dẫn, tách lớp chiếu người dùng/vật phẩm) và khảo sát InstructBLIP. Kết quả chi tiết được
-trình bày ở Chương~\ref{Chapter4}.
+trong từng người dùng -- cùng các lựa chọn thiết kế (biểu diễn đa token, backbone đã tinh chỉnh chỉ
+dẫn, tách lớp chiếu người dùng/vật phẩm). Kết quả chi tiết được trình bày ở
+Chương~\ref{Chapter4}.
 
-\textbf{Đóng góp 2: Đánh giá có hệ thống dưới giao thức AUC/uAUC trên hai tập dữ liệu.}
-Luận văn đánh giá cầu nối Q-Former dưới giao thức CTR với AUC và uAUC -- cùng giao thức với
+\textbf{Đóng góp 2: Đánh giá có hệ thống dưới quy trình AUC/uAUC trên hai tập dữ liệu.}
+Luận văn đánh giá cầu nối Q-Former dưới quy trình CTR với AUC và uAUC -- cùng quy trình với
 CoLLM -- trên MovieLens-1M và Amazon-Book, cho phép so sánh trực tiếp với CoLLM, BinLLM và
 CoRA. Phân tích ablation tách biệt đóng góp của từng đòn bẩy, và phân rã warm/cold làm rõ
 trần uAUC nằm ở chất lượng nhúng MF.
@@ -65,8 +65,7 @@ Luận văn nêu rõ các hạn chế sau một cách minh bạch:
     \item \textbf{Thiếu ablation attention-MLP:} Chưa có hàng ablation thay Q-Former bằng
     bộ chiếu attention-MLP (không truy vấn học được) -- đối chứng quan trọng nhất để cô lập
     đóng góp của cấu trúc Q-Former. Cùng với các ablation thành phần khác (đa token, tách
-    projector, InstructBLIP, \texttt{align\_rank} trên MovieLens-1M), đây là phần thực
-    nghiệm còn để ngỏ.
+    projector, \texttt{align\_rank} trên MovieLens-1M), đây là phần thực nghiệm còn để ngỏ.
 
     \item \textbf{Chi phí tính toán cao hơn CoLLM:} Cầu nối Q-Former làm tăng chi phí huấn
     luyện so với lớp MLP đơn giản của CoLLM (dù không sinh trọng số theo từng mẫu như CoRA).
@@ -93,8 +92,9 @@ Từ các hạn chế và quan sát trên, luận văn đề xuất những hư�
 
 \textbf{Ablation và phân tích sâu hơn:}
 \begin{itemize}
-    \item Ablation bật/tắt riêng InstructBLIP conditioning để chốt đóng góp độc lập
-    của thành phần này.
+    \item Bổ sung hàng ablation attention-MLP (bộ chiếu có self-attention nhưng không có
+    truy vấn học được) để cô lập đóng góp của cấu trúc Q-Former khỏi phần phi tuyến +
+    attention đơn thuần.
     \item Phân tích attention map của Q-Former để hiểu truy vấn nào học cách trích xuất
     thông tin gì từ tín hiệu CF.
 \end{itemize}
@@ -112,7 +112,7 @@ Từ các hạn chế và quan sát trên, luận văn đề xuất những hư�
 \begin{itemize}
     \item Bổ sung hàng ablation attention-MLP và các ablation thành phần còn để ngỏ dưới
     cùng backbone Vicuna để cô lập đầy đủ đóng góp của cấu trúc Q-Former.
-    \item Khảo sát hướng tiêm trọng số kiểu CoRA như một đường \textit{bổ sung} cho soft
+    \item Khảo sát hướng sinh trọng số kiểu CoRA như một đường \textit{bổ sung} cho soft
     token (chưa hiện thực trong luận văn này) để so sánh trực tiếp hai cơ chế đưa CF vào LLM.
     \item Khảo sát các backbone LLM khác (Llama-3, Mistral) để kiểm chứng tính tổng
     quát của cầu nối Q-Former.

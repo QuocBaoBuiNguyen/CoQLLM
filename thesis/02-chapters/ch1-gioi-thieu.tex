@@ -76,9 +76,9 @@ tín hiệu CF vào không gian ngữ nghĩa LLM một cách có kiểm soát v�
 \section{Khoảng trống nghiên cứu}
 \label{sec:khoang-trong}
 
-Kiến trúc Q-Former, được giới thiệu trong BLIP-2~\cite{blip2_2023} và phát triển thêm
-trong InstructBLIP~\cite{instructblip2023}, là một cầu nối đa phương thức được thiết kế
-cho bài toán căn chỉnh giữa thông tin hình ảnh và không gian ngôn ngữ. Q-Former sử dụng
+Kiến trúc Q-Former, được giới thiệu trong BLIP-2~\cite{blip2_2023}, là một cầu nối đa
+phương thức được thiết kế cho bài toán căn chỉnh giữa thông tin hình ảnh và không gian
+ngôn ngữ. Q-Former sử dụng
 một tập nhỏ các véc-tơ truy vấn \textit{học được} (learned query tokens) cùng cơ chế
 cross-attention để trích xuất có chọn lọc các đặc trưng từ tín hiệu đầu vào, thay vì
 chiếu toàn bộ tín hiệu qua một phép biến đổi đơn giản. Cơ chế này về nguyên tắc thích
@@ -90,24 +90,24 @@ Công trình ILM~\cite{ilm2024} đã thử nghiệm ý tưởng dùng Q-Former n
 thông tin CF vào LLM cho bài toán gợi ý. Tuy nhiên, hướng nghiên cứu này còn tồn tại
 hai khoảng trống quan trọng chưa được giải quyết:
 
-\textbf{Thứ nhất}, ILM chưa đánh giá dưới giao thức dự đoán tỉ lệ nhấp (click-through
+\textbf{Thứ nhất}, ILM chưa đánh giá dưới quy trình dự đoán tỉ lệ nhấp (click-through
 rate -- CTR) với các độ đo AUC và uAUC như CoLLM và các công trình cùng dòng, nên không
 thể so sánh trực tiếp hiệu quả của cầu nối Q-Former với lớp chiếu tuyến tính trên cùng
 điều kiện thực nghiệm.
 
-\textbf{Thứ hai}, cầu nối Q-Former trong ILM chưa được tăng cường bằng các kỹ thuật hiện
-đại như: (i)~conditioning theo chỉ dẫn (InstructBLIP~\cite{instructblip2023}) để truy
-vấn phụ thuộc tác vụ; (ii)~biểu diễn đa token cho tín hiệu CF; (iii)~các lựa chọn thiết
-kế như tách lớp chiếu người dùng và vật phẩm.
+\textbf{Thứ hai}, cầu nối Q-Former trong ILM chưa được tăng cường bằng: (i)~điều kiện hóa
+truy vấn theo người dùng và mục tiêu bảo toàn thứ tự trong từng người dùng để cải thiện AUC/uAUC;
+(ii)~biểu diễn đa token cho tín hiệu CF; (iii)~các lựa chọn thiết kế như tách lớp chiếu
+người dùng và vật phẩm.
 
 Luận văn này lấp hai khoảng trống nêu trên:
 
 \begin{quote}
 \textit{Mặc dù Q-Former đã được dùng để nối thông tin cộng tác với LLM (ILM), hướng này
-vẫn chưa được đánh giá dưới giao thức CTR với AUC và uAUC như dòng CoLLM, và chưa được
-khảo sát khi tăng cường bằng các kỹ thuật hiện đại như InstructBLIP, biểu diễn đa token.
+vẫn chưa được đánh giá dưới quy trình CTR với AUC và uAUC như dòng CoLLM, và chưa được
+khảo sát khi tăng cường bằng các đòn bẩy huấn luyện chuyên biệt và biểu diễn đa token.
 Luận văn này lấp khoảng trống đó: xây dựng và tăng cường một cầu nối Q-Former để tích
-hợp thông tin cộng tác vào LLM, đánh giá có hệ thống dưới giao thức AUC/uAUC và đối
+hợp thông tin cộng tác vào LLM, đánh giá có hệ thống dưới quy trình AUC/uAUC và đối
 chiếu trực tiếp với baseline CoLLM.}
 \end{quote}
 
@@ -123,11 +123,11 @@ Q-Former, và LLM đông cứng (Vicuna-7B-v1.5) với LoRA -- trong đó cầu 
 trò căn chỉnh tín hiệu CF vào không gian ngữ nghĩa của LLM. Trên nền cầu nối soft token,
 luận văn bổ sung hai đòn bẩy huấn luyện: điều kiện hóa truy vấn theo người dùng
 (\texttt{user\_conditioned}, nhằm cải thiện AUC) và mục tiêu bảo toàn thứ tự
-nội-người-dùng (\texttt{align\_rank\_loss}, nhằm cải thiện uAUC). Song song, luận văn khảo
+trong từng người dùng (\texttt{align\_rank\_loss}, nhằm cải thiện uAUC). Song song, luận văn khảo
 sát các lựa chọn thiết kế bổ sung (biểu diễn đa token, backbone đã tinh chỉnh chỉ dẫn, tách
-lớp chiếu người dùng và vật phẩm) và InstructBLIP như hướng tăng cường.
+lớp chiếu người dùng và vật phẩm).
 
-\textbf{Mục tiêu 2:} Đánh giá có hệ thống cầu nối Q-Former dưới giao thức CTR với hai
+\textbf{Mục tiêu 2:} Đánh giá có hệ thống cầu nối Q-Former dưới quy trình CTR với hai
 độ đo AUC và uAUC trên hai tập dữ liệu MovieLens-1M và Amazon-Book -- điều mà ILM chưa thực
 hiện -- đối chiếu trực tiếp với baseline CoLLM, BinLLM và CoRA.
 
@@ -138,12 +138,12 @@ Từ hai mục tiêu trên, luận văn đóng góp:
     Luận văn thích nghi kiến trúc Q-Former từ miền ảnh-ngôn ngữ sang miền gợi ý,
     trong đó tín hiệu CF thay thế đặc trưng ảnh như đầu vào của cross-attention, và đưa
     vào LLM qua đường soft token. Trên nền đó, luận văn bổ sung hai đòn bẩy huấn luyện --
-    điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự nội-người-dùng --
+    điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự trong từng người dùng --
     cải thiện lần lượt AUC và uAUC, cùng các lựa chọn thiết kế bổ sung (biểu diễn đa token,
-    backbone đã tinh chỉnh chỉ dẫn, tách projector) và khảo sát InstructBLIP.
+    backbone đã tinh chỉnh chỉ dẫn, tách projector).
 
-    \item \textbf{Đánh giá có hệ thống dưới giao thức AUC/uAUC:} Luận văn đánh giá
-    cầu nối Q-Former dưới giao thức CTR với AUC và uAUC -- cùng giao thức với CoLLM,
+    \item \textbf{Đánh giá có hệ thống dưới quy trình AUC/uAUC:} Luận văn đánh giá
+    cầu nối Q-Former dưới quy trình CTR với AUC và uAUC -- cùng quy trình với CoLLM,
     cho phép so sánh trực tiếp -- trên hai tập dữ liệu MovieLens-1M và Amazon-Book. Đây là
     đánh giá mà các công trình Q-Former trước (ILM) chưa thực hiện, đồng thời cung cấp phân
     tích ablation về đóng góp của từng đòn bẩy và phân rã warm/cold làm rõ trần uAUC.
@@ -162,14 +162,14 @@ Phần còn lại của luận văn được tổ chức như sau.
 \textbf{Chương~\ref{Chapter2} --- Các công trình liên quan} phân tích theo bốn nhánh:
 lọc cộng tác truyền thống và hạn chế của nó; LLM trong hệ thống tư vấn và thách thức
 về độ dài ngữ cảnh; các phương pháp tích hợp CF vào LLM qua không gian véc-tơ (MLP,
-tương phản, tiêm trọng số, Q-Former); và nền tảng kiến trúc Q-Former từ BLIP-2 và
-InstructBLIP. Chương này kết luận rằng cầu nối Q-Former đáng được nghiên cứu và tăng
-cường sâu hơn.
+tương phản, sinh trọng số, Q-Former); và nền tảng kiến trúc Q-Former từ BLIP-2. Chương
+này kết luận rằng cầu nối Q-Former đáng được nghiên cứu và tăng cường sâu hơn.
 
 \textbf{Chương~\ref{Chapter3} --- Phương pháp đề xuất} trình bày kiến trúc SigLLM với
 ba khối nối tiếp và lý do chọn Q-Former thay lớp chiếu tuyến tính của CoLLM. Chương này
-mô tả cơ chế Q-Former được thích nghi, các lựa chọn thiết kế, InstructBLIP như hướng
-tăng cường chính, và quy trình huấn luyện ba giai đoạn.
+mô tả cơ chế Q-Former được thích nghi, hai đòn bẩy huấn luyện (điều kiện hóa truy vấn
+theo người dùng, mục tiêu bảo toàn thứ tự), các lựa chọn thiết kế, và quy trình huấn
+luyện ba giai đoạn.
 
 \textbf{Chương~\ref{Chapter4} --- Thực nghiệm và Kết quả} trình bày thiết lập thực
 nghiệm trên hai tập dữ liệu MovieLens-1M và Amazon-Book, kết quả so sánh với CoLLM, BinLLM
