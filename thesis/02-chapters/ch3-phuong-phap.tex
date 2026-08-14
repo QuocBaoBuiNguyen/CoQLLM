@@ -11,9 +11,8 @@ với cross-attention có kiểm soát là lựa chọn thay thế tự nhiên h
 Mục~\ref{sec:kien-truc-tong-quan} mô tả kiến trúc tổng thể ba khối.
 Mục~\ref{sec:mf} trình bày khối phân rã ma trận. Mục~\ref{sec:qformer} là lõi kỹ thuật:
 cầu nối Q-Former và lý do chọn nó thay MLP. Mục~\ref{sec:lua-chon-thiet-ke} trình bày
-các lựa chọn thiết kế bổ sung. Mục~\ref{sec:instructblip-aug} khảo sát InstructBLIP như
-hướng tăng cường chính. Mục~\ref{sec:ba-giai-doan} trình bày quy trình huấn luyện ba
-giai đoạn.
+các lựa chọn thiết kế bổ sung. Mục~\ref{sec:ba-giai-doan} trình bày quy trình huấn luyện
+ba giai đoạn.
 
 \section{Tổng quan kiến trúc}
 \label{sec:kien-truc-tong-quan}
@@ -73,7 +72,7 @@ chất lượng tín hiệu CF khỏi quá trình tối ưu hóa LLM, tạo đi�
 nút thắt của hệ thống. Trong phạm vi luận văn, MF được huấn luyện trên phần tập huấn
 luyện của MovieLens-1M (chi tiết tại Mục~\ref{sec:thiet-lap-thuc-nghiem}).
 
-\section{Cầu nối Q-Former: lõi phương pháp}
+\section{Cầu nối Q-Former: thành phần cốt lõi}
 \label{sec:qformer}
 
 \subsection{Lý do chọn Q-Former thay lớp chiếu tuyến tính}
@@ -106,20 +105,20 @@ diễn tối ưu cho tác vụ, điều mà một phép chiếu tuyến tính đ
 luận điểm được nhất quán xuyên suốt chương và được kiểm chứng qua ablation ở
 Mục~\ref{sec:ablation}.
 
-\subsection{Kiến trúc Q-Former thích nghi cho gợi ý}
+\subsection{Điều chỉnh kiến trúc Q-Former cho bài toán gợi ý}
 \label{ssec:qformer-kien-truc}
 
-Cầu nối được xây dựng dựa trên kiến trúc Q-Former theo InstructBLIP~\cite{instructblip2023},
-kế thừa từ BLIP-2~\cite{blip2_2023}. SigLLM sử dụng $Q = 8$ véc-tơ truy vấn học được
-$\mathbf{Q} \in \mathbb{R}^{Q \times d_{\text{model}}}$, với $d_{\text{model}} = 768$ và
-nhánh văn bản khởi tạo từ \texttt{bert-base-uncased}.
+Cầu nối được xây dựng dựa trên kiến trúc Q-Former của BLIP-2~\cite{blip2_2023}. SigLLM
+sử dụng $Q = 8$ véc-tơ truy vấn học được $\mathbf{Q} \in \mathbb{R}^{Q \times
+d_{\text{model}}}$, với $d_{\text{model}} = 768$ và nhánh văn bản khởi tạo từ
+\texttt{bert-base-uncased} (dùng cho các mục tiêu căn chỉnh vật phẩm--văn bản ở
+Giai đoạn 1, Mục~\ref{ssec:stage1}).
 
 Trong mỗi lớp Q-Former, các truy vấn đi qua hai loại attention:
 
 \begin{enumerate}
-    \item \textit{Self-attention} giữa các truy vấn với nhau (và với token chỉ dẫn, nếu
-    dùng InstructBLIP): cho phép các truy vấn điều phối lẫn nhau và tích hợp thông tin
-    ngữ cảnh tác vụ.
+    \item \textit{Self-attention} giữa các truy vấn với nhau: cho phép các truy vấn điều
+    phối lẫn nhau, mỗi truy vấn đảm nhận một khía cạnh khác nhau của tín hiệu CF.
 
     \item \textit{Cross-attention} từ các truy vấn đến đặc trưng CF: mỗi truy vấn trọng
     số hóa và tổng hợp thông tin từ tập véc-tơ CF đầu vào $\{e_u, e_i, e_{i'}\}$.
@@ -128,14 +127,15 @@ Trong mỗi lớp Q-Former, các truy vấn đi qua hai loại attention:
 Đầu ra là khối truy vấn $\mathbf{Z} = \text{cf\_q} \in \mathbb{R}^{B \times Q \times
 d_{\text{model}}}$, trong đó $B$ là kích thước lô và $Q = 8$.
 
-\textbf{Quan sát quan trọng về vai trò thay đổi giữa hai miền.} Trong InstructBLIP,
-đầu vào của cross-attention là một chuỗi dài các mảng ảnh (patch features), và
-cross-attention là cơ chế nén chính: nén hàng trăm patch thành $Q = 32$ truy vấn. Trong
-SigLLM, đầu vào của cross-attention chỉ là một vài véc-tơ CF (người dùng, vật phẩm mục
-tiêu, lịch sử), nên cross-attention chủ yếu thực hiện tổng hợp có trọng số. Cơ chế trích
-xuất đặc trưng phụ thuộc tác vụ chủ yếu đến từ self-attention giữa các truy vấn và token
-chỉ dẫn. Nhận định này giải thích quan sát thực nghiệm rằng việc tăng số lớp Q-Former
-không cải thiện đáng kể kết quả, trong khi đa dạng hóa chỉ dẫn lại có tác dụng.
+\textbf{Quan sát quan trọng về vai trò của cross-attention.} Trong BLIP-2 cho thị giác,
+đầu vào của cross-attention là một chuỗi dài các mảng ảnh (patch features) và
+cross-attention đóng vai trò nén chính: nén hàng trăm patch thành một số ít truy vấn.
+Trong SigLLM, đầu vào của cross-attention chỉ gồm một vài véc-tơ CF (người dùng, vật phẩm
+mục tiêu, lịch sử), nên cross-attention chủ yếu thực hiện tổng hợp có trọng số; lợi thế
+của cầu nối do đó chủ yếu đến từ \textit{tập truy vấn học được và self-attention điều phối
+giữa chúng}, chứ không phải khả năng nén. Nhận định này nhất quán với quan sát thực nghiệm
+rằng việc tăng số lớp Q-Former không cải thiện đáng kể kết quả -- dung lượng không phải nút
+thắt, chất lượng căn chỉnh mới là điều quyết định.
 
 \subsection{Đưa tín hiệu CF vào LLM qua soft token}
 \label{ssec:hai-duong}
@@ -263,50 +263,6 @@ và một cho các nhúng vật phẩm $\{e_i, e_{i'}\}$. Để duy trì khả n
 cũ (chỉ có một lớp chiếu chung), trọng số của lớp chiếu chung được khởi tạo đồng thời
 cho cả hai lớp mới.
 
-\section{Tăng cường Q-Former theo InstructBLIP}
-\label{sec:instructblip-aug}
-
-\subsection{Cơ chế conditioning theo chỉ dẫn}
-\label{ssec:instructblip-co-che}
-
-InstructBLIP~\cite{instructblip2023} mở rộng Q-Former bằng cách đưa token chỉ dẫn văn
-bản tham gia vào self-attention cùng với các véc-tơ truy vấn. Kết quả là đầu ra
-$\mathbf{Z}$ của Q-Former phụ thuộc vào nội dung chỉ dẫn: cùng một đầu vào CF nhưng với
-chỉ dẫn khác nhau, Q-Former trích xuất các khía cạnh khác nhau. Thiết kế này cho phép
-một Q-Former duy nhất xử lý nhiều tác vụ khác nhau mà không cần tinh chỉnh riêng.
-
-\subsection{Thích nghi cho bài toán gợi ý}
-\label{ssec:instructblip-thich-nghi}
-
-Trong SigLLM, chỉ dẫn (instruction) được đưa vào self-attention của Q-Former dưới dạng
-tập token. Với bài toán CTR trên MovieLens-1M, chỉ dẫn mô tả tác vụ và ngữ cảnh người
-dùng--phim: ví dụ, \textit{``Given the user's watching history and preferences, predict
-whether the user will click on the target movie.''}
-
-Cơ chế conditioning theo chỉ dẫn hứa hẹn cải thiện chất lượng trích xuất đặc trưng CF
-vì Q-Former có thể tập trung vào các khía cạnh của tín hiệu CF liên quan nhất đến tác vụ
-CTR cụ thể. Trong bài toán BLIP-2/InstructBLIP, conditioning theo chỉ dẫn mang lại cải
-thiện đáng kể trên các tác vụ zero-shot~\cite{instructblip2023}.
-
-\textit{Về phạm vi của conditioning.} Trong InstructBLIP, sức mạnh của cơ chế đến
-từ việc chỉ dẫn \textit{thay đổi} giữa nhiều tác vụ khác nhau, khiến cùng một đầu vào cho
-ra biểu diễn khác nhau tùy tác vụ. Trong phiên bản hiện tại của SigLLM, chỉ dẫn CTR được
-giữ \textit{cố định} cho mọi mẫu; do đó cơ chế thực chất gần với Q-Former truy vấn cố định
-có bổ sung ngữ cảnh tác vụ ở tầng self-attention, hơn là conditioning phụ thuộc từng mẫu
-theo đúng nghĩa của InstructBLIP. Việc khảo sát nhiều mẫu chỉ dẫn khác nhau (ví dụ, chỉ
-dẫn phụ thuộc thể loại phim hay hồ sơ người dùng) để khai thác đầy đủ conditioning phụ
-thuộc mẫu được để ngỏ như một hướng thực nghiệm; luận văn không tuyên bố vượt quá những gì
-cấu hình chỉ dẫn cố định hỗ trợ.
-
-\subsection{Kết quả và vị trí trong luận văn}
-\label{ssec:instructblip-ket-qua}
-
-Thực nghiệm về hiệu quả của InstructBLIP trên bài toán gợi ý được trình bày ở
-Mục~\ref{sec:ket-qua-chinh} và Mục~\ref{sec:ablation} của Chương~\ref{Chapter4}. Như
-đã lưu ý ở Mục~\ref{sec:dong-gop}, kết quả của hướng tăng cường này vẫn đang trong quá
-trình thực nghiệm; luận văn báo cáo những gì đã đo được mà không phóng đại vượt
-quá bằng chứng.
-
 \section{Quy trình huấn luyện ba giai đoạn}
 \label{sec:ba-giai-doan}
 
@@ -410,5 +366,5 @@ truy vấn học được cho phép căn chỉnh tín hiệu CF vào không gian
 soát hơn, vượt qua giới hạn của giả thiết tuyến tính. Trên nền cầu nối soft token, hai
 đòn bẩy huấn luyện -- điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự
 nội-người-dùng -- cải thiện lần lượt AUC và uAUC. Các lựa chọn thiết kế bổ sung (đa token,
-backbone đã tinh chỉnh chỉ dẫn, tách projector) và hướng tăng cường InstructBLIP được trình
-bày như các thành phần đã khảo sát, với kết quả thực nghiệm ở Chương~\ref{Chapter4}.
+backbone đã tinh chỉnh chỉ dẫn, tách projector) được trình bày như các thành phần đã khảo
+sát, với kết quả thực nghiệm ở Chương~\ref{Chapter4}.

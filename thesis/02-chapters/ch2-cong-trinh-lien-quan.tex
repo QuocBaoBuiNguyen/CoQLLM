@@ -10,8 +10,8 @@ và chỉ ra rào cản về độ dài ngữ cảnh -- yếu tố buộc tín h
 dưới dạng véc-tơ gọn (compact) thay vì văn bản. \textit{Nhánh thứ ba}
 (Mục~\ref{sec:cach-noi-cf-llm}) phân tích năm cách tích hợp CF vào LLM qua không gian
 véc-tơ, làm nổi bật điểm mạnh và hạn chế của từng hướng. \textit{Nhánh thứ tư}
-(Mục~\ref{sec:nen-tang-qformer}) trình bày nền tảng kiến trúc Q-Former từ BLIP-2 và
-InstructBLIP -- cơ sở lý thuyết cho phương pháp đề xuất ở Chương~\ref{Chapter3}.
+(Mục~\ref{sec:nen-tang-qformer}) trình bày nền tảng kiến trúc Q-Former từ BLIP-2 -- cơ sở
+lý thuyết cho phương pháp đề xuất ở Chương~\ref{Chapter3}.
 
 \section{Lọc cộng tác truyền thống}
 \label{sec:cf-truyen-thong}
@@ -175,7 +175,7 @@ thông tin từ véc-tơ CF liên tục, dẫn đến mất mát thông tin khô
 ra, chuỗi nhị phân không mang ý nghĩa ngữ nghĩa trong từ vựng LLM, nên LLM phải học cách
 diễn giải cú pháp nhị phân -- một bài toán học bổ sung không tầm thường.
 
-\subsection{Tiêm vào trọng số: CoRA}
+\subsection{Hiệu chỉnh trọng số LLM: CoRA}
 \label{ssec:cora-rel}
 
 CoRA~\cite{cora2024} đề xuất một cơ chế khác biệt: thay vì đưa CF vào không gian đầu
@@ -208,8 +208,7 @@ gian ngữ nghĩa LLM.
 
 Tuy nhiên, ILM chưa đánh giá dưới giao thức CTR với AUC và uAUC như CoLLM và các công
 trình cùng dòng, nên không thể so sánh trực tiếp hiệu quả của cầu nối Q-Former với lớp
-chiếu tuyến tính. Ngoài ra, cầu nối Q-Former trong ILM chưa được tăng cường bằng các kỹ
-thuật conditioning theo chỉ dẫn như InstructBLIP.
+chiếu tuyến tính.
 
 \subsection{Tổng hợp so sánh}
 \label{ssec:tong-hop-so-sanh}
@@ -233,7 +232,7 @@ BinLLM \cite{binllm2024} & Mã hóa nhị phân & Đơn giản; không cần sof
 \hline
 CoRA \cite{cora2024} & Tiêm vào trọng số & Cá nhân hóa sâu trong LLM & Bỏ soft token; không tận dụng căn chỉnh đầu vào \\
 \hline
-ILM \cite{ilm2024} & Q-Former (cross-attention) & Trích chọn có kiểm soát & Chưa báo AUC/uAUC; chưa tăng cường InstructBLIP \\
+ILM \cite{ilm2024} & Q-Former (cross-attention) & Trích chọn có kiểm soát & Chưa báo AUC/uAUC dưới giao thức CoLLM \\
 \hline
 \end{tabular}
 \end{center}
@@ -283,26 +282,7 @@ ngữ mà chỉ cần huấn luyện Q-Former nhẹ, giữ nguyên bộ mã hóa
 bằng bộ mã hóa CF (phân rã ma trận), và căn chỉnh CF vào không gian LLM thông
 qua cơ chế cross-attention có kiểm soát.
 
-\subsection{InstructBLIP: Conditioning theo chỉ dẫn}
-\label{ssec:instructblip}
-
-InstructBLIP~\cite{instructblip2023} mở rộng BLIP-2 bằng cách làm cho Q-Former phụ thuộc
-vào chỉ dẫn (instruction): thay vì dùng tập truy vấn cố định, các truy vấn của Q-Former
-tham gia vào self-attention cùng với token chỉ dẫn văn bản. Kết quả là đầu ra $\mathbf{Z}$
-của Q-Former phụ thuộc vào nội dung chỉ dẫn -- cùng một ảnh đầu vào nhưng với chỉ dẫn
-khác nhau, Q-Former trích xuất các đặc trưng ảnh khác nhau.
-
-Cải tiến này cho phép InstructBLIP đạt hiệu quả trên nhiều tác vụ ảnh--ngôn ngữ
-đa dạng mà không cần tinh chỉnh riêng từng tác vụ. Kết quả là InstructBLIP vượt trội
-đáng kể so với BLIP-2 trên nhiều benchmark zero-shot.
-
-Ý nghĩa cho bài toán gợi ý: Q-Former với conditioning chỉ dẫn cho phép truy vấn phụ
-thuộc tác vụ -- ví dụ, cùng tín hiệu CF nhưng với chỉ dẫn khác nhau (``người dùng có
-thích phim hành động?'' vs. ``phim này có phù hợp với sở thích của người dùng không?''),
-Q-Former có thể trích xuất các khía cạnh khác nhau của tín hiệu CF. Đây là hướng tăng
-cường chính mà luận văn khảo sát và sẽ được trình bày chi tiết ở Mục~\ref{sec:instructblip-aug}.
-
-\subsection{Kỹ thuật ổn định từ Flamingo}
+\subsection{Kỹ thuật ổn định huấn luyện từ Flamingo}
 \label{ssec:flamingo}
 
 Khi gắn một đường truyền mới lên một LLM đông cứng, việc kiểm soát ổn định là quan
@@ -327,8 +307,7 @@ Nhìn lại bốn nhánh phân tích, có thể rút ra câu kết luận sau:
 Q-Former nổi lên như cầu nối hứa hẹn nhất: cơ chế cross-attention với tập truy vấn học
 được cho phép trích chọn đặc trưng CF có kiểm soát, thay vì nén thô qua lớp chiếu
 tuyến tính của CoLLM. Tuy nhiên, hướng này chưa được kiểm chứng dưới giao thức AUC/uAUC
-của dòng CoLLM, và vẫn còn nhiều hướng tăng cường chưa được khai thác -- đặc biệt là
-conditioning theo chỉ dẫn theo InstructBLIP -- nên xứng đáng được nghiên cứu sâu hơn.}
+của dòng CoLLM, nên xứng đáng được nghiên cứu sâu hơn.}
 \end{quote}
 
 Chương tiếp theo trình bày kiến trúc SigLLM -- hiện thực hóa và tăng cường cầu nối
