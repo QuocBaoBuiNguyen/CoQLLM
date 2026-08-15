@@ -7,30 +7,30 @@
 
 Trong thập kỷ vừa qua, hệ thống tư vấn (recommender system) đã trở thành một thành phần
 cốt lõi trong các nền tảng thương mại điện tử, phát trực tuyến và mạng xã hội. Nhiệm vụ
-cốt lõi của hệ thống tư vấn là dự đoán mức độ phù hợp giữa người dùng và vật phẩm dựa
+cốt lõi của hệ thống tư vấn là dự đoán mức độ phù hợp giữa người dùng và sản phẩm dựa
 trên dữ liệu lịch sử tương tác, từ đó đưa ra các gợi ý cá nhân hóa có giá trị thực tiễn
 cao~\cite{zhang2019deep}.
 
 Phương pháp lọc cộng tác (collaborative filtering -- CF) là nền tảng của phần lớn các hệ
 thống tư vấn hiện đại. Trong đó, phân rã ma trận (matrix factorization -- MF)
-\cite{mf2009} học ánh xạ người dùng và vật phẩm thành các véc-tơ nhúng ẩn trong không
+\cite{mf2009} học ánh xạ người dùng và sản phẩm thành các véc-tơ nhúng ẩn trong không
 gian đặc trưng thấp chiều, sao cho tích vô hướng giữa hai véc-tơ phản ánh mức độ tương
 thích. Phân rã ma trận cùng các biến thể như LightGCN~\cite{lightgcn2020} -- khai thác
 cấu trúc đồ thị tương tác -- đã đạt được hiệu quả đáng kể trên nhiều bộ dữ liệu chuẩn.
 Tuy vậy, nhóm phương pháp này tồn tại ba hạn chế cố hữu: (i)~\textit{ma trận thưa thớt}
-(data sparsity) -- hầu hết các cặp người dùng--vật phẩm chưa có tương tác, khiến không
+(data sparsity) -- hầu hết các cặp người dùng--sản phẩm chưa có tương tác, khiến không
 gian huấn luyện cực kỳ thưa; (ii)~\textit{vấn đề khởi động nguội} (cold-start) -- người
-dùng mới hoặc vật phẩm mới không có lịch sử tương tác, nên hệ thống không thể tạo biểu
+dùng mới hoặc sản phẩm mới không có lịch sử tương tác, nên hệ thống không thể tạo biểu
 diễn nhúng có chất lượng; (iii)~\textit{thiếu hiểu biết ngữ nghĩa} -- các biểu diễn CF
 được học hoàn toàn từ tín hiệu tương tác nhị phân, không nắm được nội dung văn bản mô tả
-thuộc tính vật phẩm hay sở thích người dùng.
+thuộc tính sản phẩm hay sở thích người dùng.
 
 Sự bùng nổ của các mô hình ngôn ngữ lớn (large language model -- LLM) trong những năm
 gần đây đã mở ra một hướng tiếp cận mới để khắc phục những hạn chế trên. LLM được huấn
 luyện trước trên khối lượng văn bản khổng lồ, tích lũy hiểu biết ngữ nghĩa phong phú về
 thế giới và khả năng suy luận linh hoạt. Kết hợp LLM với hệ thống tư vấn đã trở thành
 một hướng nghiên cứu sôi nổi, với hai luồng chính: (1)~\textit{LLM-enhanced}: dùng LLM
-như bộ mã hóa để làm giàu biểu diễn đặc trưng người dùng và vật phẩm; (2)~\textit{LLMs
+như bộ mã hóa để làm giàu biểu diễn đặc trưng người dùng và sản phẩm; (2)~\textit{LLMs
 as Recommender Systems (LLMs-as-RS)}: đặt bài toán gợi ý trực tiếp như một tác vụ sinh
 ngôn ngữ, trong đó LLM vừa đóng vai trò hiểu ngữ cảnh vừa đưa ra gợi ý~\cite{llmrec2023}.
 Hướng tiếp cận LLMs-as-RS đặc biệt hấp dẫn vì khả năng giải quyết cold-start nhờ hiểu
@@ -47,12 +47,12 @@ làm thế nào để đưa tín hiệu hành vi lịch sử của người dùn
 Cách tiếp cận trực tiếp nhất là mã hóa lịch sử tương tác thành văn bản -- ví dụ, liệt
 kê danh sách các phim người dùng đã xem -- rồi nối vào chỉ dẫn (prompt) đầu vào của LLM.
 Tuy nhiên, cách này gặp phải một giới hạn cơ bản: với người dùng có lịch sử phong phú,
-danh sách vật phẩm nhanh chóng vượt quá độ dài ngữ cảnh (context length) cho phép, làm
+danh sách sản phẩm nhanh chóng vượt quá độ dài ngữ cảnh (context length) cho phép, làm
 mất thông tin hoặc tăng chi phí tính toán đáng kể. Đây là trở ngại thực tiễn đã được ghi
 nhận trong nhiều công trình LLMs-as-RS~\cite{collm2023}.
 
 Giải pháp tự nhiên là biểu diễn thông tin hành vi dưới dạng \textit{véc-tơ đặc trưng
-gọn (compact)}: thay vì liệt kê từng vật phẩm, ta dùng nhúng CF -- tổng hợp từ toàn bộ lịch
+gọn (compact)}: thay vì liệt kê từng sản phẩm, ta dùng nhúng CF -- tổng hợp từ toàn bộ lịch
 sử tương tác -- để nén tín hiệu cộng tác thành một véc-tơ dày đặc. Véc-tơ này sau đó
 được đưa vào LLM như một \textit{soft token}, bổ sung tín hiệu hành vi mà không làm dài
 ngữ cảnh. Cách tiếp cận này được gọi là \textit{tích hợp CF vào LLM qua không gian véc-tơ}.
@@ -98,7 +98,7 @@ thể so sánh trực tiếp hiệu quả của cầu nối Q-Former với lớp
 \textbf{Thứ hai}, cầu nối Q-Former trong ILM chưa được tăng cường bằng: (i)~điều kiện hóa
 truy vấn theo người dùng và mục tiêu bảo toàn thứ tự trong từng người dùng để cải thiện AUC/uAUC;
 (ii)~biểu diễn đa token cho tín hiệu CF; (iii)~các lựa chọn thiết kế như tách lớp chiếu
-người dùng và vật phẩm.
+người dùng và sản phẩm.
 
 Luận văn này lấp hai khoảng trống nêu trên:
 
@@ -125,7 +125,7 @@ luận văn bổ sung hai đòn bẩy huấn luyện: điều kiện hóa truy v
 (\texttt{user\_conditioned}, nhằm cải thiện AUC) và mục tiêu bảo toàn thứ tự
 trong từng người dùng (\texttt{align\_rank\_loss}, nhằm cải thiện uAUC). Song song, luận văn khảo
 sát các lựa chọn thiết kế bổ sung (biểu diễn đa token, backbone đã tinh chỉnh chỉ dẫn, tách
-lớp chiếu người dùng và vật phẩm).
+lớp chiếu người dùng và sản phẩm).
 
 \textbf{Mục tiêu 2:} Đánh giá có hệ thống cầu nối Q-Former dưới quy trình CTR với hai
 độ đo AUC và uAUC trên hai tập dữ liệu MovieLens-1M và Amazon-Book -- điều mà ILM chưa thực

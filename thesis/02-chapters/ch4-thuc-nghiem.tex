@@ -22,7 +22,7 @@ hóa thành nhãn CTR: $\geq 4$ sao được coi là nhấp (click), còn lại 
 
 \textbf{Amazon-Book}~\cite{cora2024} là một tập dữ liệu thưa hơn nhiều so với MovieLens-1M,
 theo đúng phân chia dùng trong CoLLM và CoRA. Tập này có khoảng $23$ nghìn người dùng và
-$34$ nghìn vật phẩm sách, với độ thưa và tỉ lệ người dùng/vật phẩm nguội cao hơn hẳn -- đây
+$34$ nghìn sản phẩm sách, với độ thưa và tỉ lệ người dùng/sản phẩm nguội cao hơn hẳn -- đây
 chính là điều kiện để kiểm chứng cầu nối CF--LLM trên miền khó, nơi tín hiệu CF yếu và
 LLM/Q-Former có nhiều dư địa đóng góp. Nhãn CTR được nhị phân hóa tương tự. Việc bổ sung
 Amazon-Book cho phép đánh giá khả năng tổng quát của SigLLM ngoài miền phim và làm nổi
@@ -206,7 +206,7 @@ uAUC tính AUC trong phạm vi từng người dùng rồi lấy trung bình, n�
 phép biến đổi đơn điệu riêng theo người dùng. Điều này dẫn đến một đặc điểm quan trọng:
 tín hiệu CF nếu chỉ giúp phân biệt giữa các người dùng (thay đổi \textit{mức nền} điểm
 dự đoán của mỗi người dùng) thì cải thiện AUC nhưng không cải thiện uAUC. Mô hình cần
-học thứ tự xếp hạng \textit{trong} từng người dùng -- cặp vật phẩm nào người dùng này
+học thứ tự xếp hạng \textit{trong} từng người dùng -- cặp sản phẩm nào người dùng này
 thích hơn -- thay vì chỉ phân biệt người dùng với nhau.
 
 Đặc điểm này được xác nhận trực tiếp qua phân rã warm/cold (Mục~\ref{ssec:user-group}).
@@ -215,7 +215,7 @@ hẳn nhóm \textit{nguội} (cold): trên Amazon-Book, uAUC warm đạt $0{,}62
 CoRA-MF ($0{,}6262$) -- trong khi uAUC cold chỉ $0{,}5258$, tức xấp xỉ mức ngẫu nhiên. Nhóm
 cold kéo trung bình toàn tập xuống $0{,}6062$. Điều này cho thấy trần của uAUC không nằm ở
 cầu nối Q-Former (nếu Q-Former yếu thì AUC cũng phải sập, nhưng AUC vẫn cao $\approx 0{,}81$)
-mà ở \textit{chất lượng nhúng CF của MF cho người dùng/vật phẩm nguội}. Đây là căn cứ để
+mà ở \textit{chất lượng nhúng CF của MF cho người dùng/sản phẩm nguội}. Đây là căn cứ để
 định hướng cải thiện uAUC về phía MF teacher (Mục~\ref{sec:huong-phat-trien}) thay vì tinh
 chỉnh thêm kiến trúc cầu nối.
 
@@ -284,7 +284,7 @@ chỉnh không gian CF về phía không gian ngữ nghĩa LLM.
 \label{ssec:user-group}
 
 Để kiểm chứng động lực cold-start, luận văn phân rã tập kiểm tra thành hai nhóm: người dùng
-\textit{ấm} (warm -- có nhúng MF, tức MF đã ``thấy'' người dùng/vật phẩm trong huấn luyện)
+\textit{ấm} (warm -- có nhúng MF, tức MF đã ``thấy'' người dùng/sản phẩm trong huấn luyện)
 và người dùng \textit{nguội} (cold -- MF không có nhúng, phải dùng đại diện mặc định).
 Bảng~\ref{tab:warm-cold} trình bày AUC/uAUC theo từng nhóm trên cả hai tập dữ liệu.
 
@@ -317,7 +317,7 @@ Kết quả nhất quán trên cả hai tập dữ liệu: nhóm warm đạt uAU
 ($0{,}7254$ vs $0{,}5969$ trên MovieLens-1M; $0{,}6238$ vs $0{,}5258$ trên Amazon-Book). Trên
 Amazon-Book, uAUC nhóm warm ($0{,}6238$) gần chạm CoRA-MF ($0{,}6262$), trong khi nhóm cold
 xấp xỉ mức ngẫu nhiên. Điều này khẳng định uAUC bị chặn trên bởi \textit{chất lượng nhúng CF
-cho người dùng/vật phẩm nguội} chứ không phải bởi cầu nối: ở nhóm warm -- nơi MF cung cấp tín
+cho người dùng/sản phẩm nguội} chứ không phải bởi cầu nối: ở nhóm warm -- nơi MF cung cấp tín
 hiệu tốt -- SigLLM khai thác hiệu quả và tiệm cận baseline mạnh nhất. Nhận định này khớp với
 phân tích nghịch lý AUC/uAUC (Mục~\ref{sec:nghich-ly}) và chỉ ra đòn bẩy cải thiện tiếp theo
 nằm ở MF teacher trên nhóm cold (Mục~\ref{sec:huong-phat-trien}).
@@ -360,6 +360,6 @@ Luận văn thừa nhận các hạn chế thực nghiệm sau:
     Amazon-Book, số liệu CoLLM/BinLLM/CoRA lấy từ lần chạy lại của CoRA (chọn theo AUC),
     khác quy trình chọn checkpoint theo uAUC của SigLLM.
     \item \textbf{Trần uAUC ở nhóm cold:} uAUC bị chặn trên bởi chất lượng nhúng MF cho
-    người dùng/vật phẩm nguội (Mục~\ref{ssec:user-group}), không phải bởi cầu nối; cải
+    người dùng/sản phẩm nguội (Mục~\ref{ssec:user-group}), không phải bởi cầu nối; cải
     thiện tiếp theo cần MF teacher mạnh hơn trên nhóm cold.
 \end{enumerate}

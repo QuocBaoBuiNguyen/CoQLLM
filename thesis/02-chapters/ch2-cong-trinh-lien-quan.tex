@@ -17,16 +17,16 @@ lý thuyết cho phương pháp đề xuất ở Chương~\ref{Chapter3}.
 \label{sec:cf-truyen-thong}
 
 Lọc cộng tác (collaborative filtering -- CF) khai thác hành vi tập thể của người dùng:
-những người dùng có hành vi tương tự trong quá khứ có xu hướng thích những vật phẩm
-giống nhau trong tương lai. Phương pháp này không cần thông tin nội dung vật phẩm, chỉ
-dựa trên ma trận tương tác người dùng--vật phẩm~\cite{zhang2019deep}.
+những người dùng có hành vi tương tự trong quá khứ có xu hướng thích những sản phẩm
+giống nhau trong tương lai. Phương pháp này không cần thông tin nội dung sản phẩm, chỉ
+dựa trên ma trận tương tác người dùng--sản phẩm~\cite{zhang2019deep}.
 
 \subsection{Phân rã ma trận}
 \label{ssec:mf}
 
 Phân rã ma trận (matrix factorization -- MF)~\cite{mf2009} là phương pháp CF nền tảng,
 đạt được thành công lớn trong cuộc thi Netflix Prize. MF học ánh xạ mỗi người dùng $u$
-và vật phẩm $i$ thành các véc-tơ nhúng ẩn $e_u, e_i \in \mathbb{R}^d$ sao cho tích vô
+và sản phẩm $i$ thành các véc-tơ nhúng ẩn $e_u, e_i \in \mathbb{R}^d$ sao cho tích vô
 hướng $e_u^\top e_i$ xấp xỉ mức độ tương thích. Hàm mục tiêu phổ biến là hồi quy bình
 phương tối thiểu (RMSE) trên các đánh giá quan sát được, hoặc học xếp hạng cặp theo mục
 tiêu BPR~\cite{bpr2009}.
@@ -35,12 +35,12 @@ tiêu BPR~\cite{bpr2009}.
 kiểm chứng. Tuy nhiên, MF học biểu diễn tuyến tính qua tích vô hướng, hạn chế khả năng
 mô hình hóa các quan hệ phi tuyến phức tạp. Lọc cộng tác thần kinh (neural collaborative
 filtering -- NCF)~\cite{ncf2017} mở rộng MF bằng cách thay tích vô hướng bởi mạng nơ-ron
-nhiều lớp, cho phép học các tương tác người dùng--vật phẩm phi tuyến.
+nhiều lớp, cho phép học các tương tác người dùng--sản phẩm phi tuyến.
 
 \subsection{Lọc cộng tác dựa trên đồ thị}
 \label{ssec:lightgcn}
 
-Tương tác người dùng--vật phẩm có thể được biểu diễn tự nhiên như một đồ thị hai phía
+Tương tác người dùng--sản phẩm có thể được biểu diễn tự nhiên như một đồ thị hai phía
 (bipartite graph). LightGCN~\cite{lightgcn2020} khai thác cấu trúc đồ thị này bằng mạng
 tích chập đồ thị (graph convolutional network -- GCN): nhúng của mỗi nút được cập nhật
 bằng cách tổng hợp tuyến tính nhúng của các nút láng giềng, qua nhiều bước lan truyền.
@@ -52,18 +52,18 @@ tin cấu trúc bậc cao của đồ thị tương tác.
 
 Mặc dù đạt hiệu quả tốt, các phương pháp CF truyền thống tồn tại ba hạn chế cơ bản:
 
-\textbf{Vấn đề thưa thớt dữ liệu.} Ma trận tương tác người dùng--vật phẩm trong thực
+\textbf{Vấn đề thưa thớt dữ liệu.} Ma trận tương tác người dùng--sản phẩm trong thực
 tế cực kỳ thưa: tỉ lệ quan sát trên tổng số cặp thường dưới 1\%. Dữ liệu thưa dẫn đến
-ước lượng nhúng kém chất lượng cho người dùng và vật phẩm ít tương tác.
+ước lượng nhúng kém chất lượng cho người dùng và sản phẩm ít tương tác.
 
-\textbf{Vấn đề khởi động nguội.} Người dùng mới và vật phẩm mới không có lịch sử tương
+\textbf{Vấn đề khởi động nguội.} Người dùng mới và sản phẩm mới không có lịch sử tương
 tác, nên các phương pháp CF không thể xây dựng biểu diễn nhúng cho họ. Đây là hạn chế
-nghiêm trọng trong hệ thống thực tế, nơi người dùng mới và vật phẩm mới liên tục xuất
+nghiêm trọng trong hệ thống thực tế, nơi người dùng mới và sản phẩm mới liên tục xuất
 hiện.
 
 \textbf{Thiếu hiểu biết ngữ nghĩa.} Biểu diễn CF học thuần từ tín hiệu tương tác nhị
-phân, không nắm được nội dung văn bản mô tả vật phẩm hay sở thích người dùng. Điều này
-hạn chế khả năng gợi ý cho vật phẩm mới (zero interaction) và khả năng giải thích gợi ý
+phân, không nắm được nội dung văn bản mô tả sản phẩm hay sở thích người dùng. Điều này
+hạn chế khả năng gợi ý cho sản phẩm mới (zero interaction) và khả năng giải thích gợi ý
 bằng ngôn ngữ tự nhiên.
 
 Những hạn chế này thúc đẩy hướng kết hợp LLM -- có khả năng hiểu ngữ nghĩa văn bản
@@ -82,7 +82,7 @@ trong những hướng nghiên cứu tích cực nhất trong những năm gần
 Có thể phân loại các phương pháp kết hợp LLM và hệ thống tư vấn thành hai hướng chính:
 
 \textbf{LLM-enhanced}: dùng LLM như bộ mã hóa để tạo biểu diễn ngữ nghĩa cho người
-dùng và vật phẩm, sau đó tích hợp vào pipeline gợi ý truyền thống. Trong hướng này, LLM
+dùng và sản phẩm, sau đó tích hợp vào pipeline gợi ý truyền thống. Trong hướng này, LLM
 chủ yếu đóng vai trò trích xuất đặc trưng ngôn ngữ; quyết định gợi ý vẫn do các mô hình
 CF hoặc xếp hạng đảm nhận.
 
@@ -91,10 +91,10 @@ CF hoặc xếp hạng đảm nhận.
 trình đầu tiên theo hướng này, đặt nhiều bài toán gợi ý (xếp hạng, dự đoán đánh giá,
 giải thích) thành các cặp câu hỏi--trả lời và huấn luyện một mô hình T5 thống nhất.
 BIGRec~\cite{bigrec2023} tinh chỉnh LLM để gợi ý bằng cách ánh xạ đầu ra ngôn ngữ về
-không gian vật phẩm qua cơ chế căn chỉnh.
+không gian sản phẩm qua cơ chế căn chỉnh.
 
 Hướng LLMs-as-RS đặc biệt hấp dẫn vì khả năng tận dụng tri thức thế giới sẵn có trong
-LLM để giải quyết cold-start -- người dùng và vật phẩm mới có thể được mô tả bằng văn
+LLM để giải quyết cold-start -- người dùng và sản phẩm mới có thể được mô tả bằng văn
 bản, và LLM có thể suy luận về sở thích ngay cả khi chưa có lịch sử tương tác. Luận văn
 này theo đuổi hướng LLMs-as-RS.
 
@@ -141,8 +141,8 @@ phép biến đổi duy nhất, không phân biệt thành phần nào quan tr�
 \label{ssec:sellarec}
 
 SellaRec~\cite{sellarec2024} căn chỉnh biểu diễn CF và biểu diễn ngôn ngữ thông qua học
-tương phản (contrastive learning) với mục tiêu InfoNCE: kéo gần biểu diễn của cùng vật
-phẩm trong không gian CF và không gian ngôn ngữ, đồng thời đẩy xa các vật phẩm khác nhau.
+tương phản (contrastive learning) với mục tiêu InfoNCE: kéo gần biểu diễn của cùng sản
+phẩm trong không gian CF và không gian ngôn ngữ, đồng thời đẩy xa các sản phẩm khác nhau.
 Cách tiếp cận này cung cấp một tín hiệu huấn luyện toàn cục mạnh hơn so với chiếu trực
 tiếp.
 
@@ -181,7 +181,7 @@ diễn giải cú pháp nhị phân -- một bài toán học bổ sung không t
 CoRA~\cite{cora2024} đề xuất một cơ chế khác biệt: thay vì đưa CF vào không gian đầu
 vào của LLM như soft token, CoRA biến đổi véc-tơ CF thành một lượng thay đổi trọng số
 hạng thấp, phụ thuộc vào mẫu (sample-specific), cộng trực tiếp vào các lớp attention của
-LLM. Theo đó, mỗi mẫu (cặp người dùng--vật phẩm) có một tập trọng số điều chỉnh riêng,
+LLM. Theo đó, mỗi mẫu (cặp người dùng--sản phẩm) có một tập trọng số điều chỉnh riêng,
 cho phép LLM cá nhân hóa tính toán ở mức độ sâu hơn.
 
 Tuy nhiên, CoRA bỏ hoàn toàn cơ chế soft token -- CF chỉ được đưa vào qua đường trọng số.

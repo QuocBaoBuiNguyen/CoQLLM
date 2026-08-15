@@ -28,7 +28,7 @@ Hình~\ref{fig:kien-truc}:
 
 \begin{enumerate}
     \item \textbf{Khối Phân rã ma trận (MF)} -- cung cấp tín hiệu lọc cộng tác dưới dạng
-    véc-tơ nhúng cho người dùng và vật phẩm.
+    véc-tơ nhúng cho người dùng và sản phẩm.
 
     \item \textbf{Cầu nối Q-Former} -- nén và căn chỉnh véc-tơ CF vào không gian ngữ nghĩa
     của LLM thông qua cross-attention với các véc-tơ truy vấn học được.
@@ -57,8 +57,8 @@ LLM, giảm chi phí huấn luyện, và cho phép phân tích rõ ràng đóng 
 \section{Khối Phân rã ma trận}
 \label{sec:mf}
 
-Khối MF đóng vai trò nguồn tín hiệu lọc cộng tác. Từ ma trận tương tác người dùng--vật
-phẩm, MF học ánh xạ mỗi người dùng $u$ và vật phẩm $i$ thành các véc-tơ nhúng ẩn
+Khối MF đóng vai trò nguồn tín hiệu lọc cộng tác. Từ ma trận tương tác người dùng--sản
+phẩm, MF học ánh xạ mỗi người dùng $u$ và sản phẩm $i$ thành các véc-tơ nhúng ẩn
 $e_u, e_i \in \mathbb{R}^{d}$ sao cho tích vô hướng $e_u^\top e_i$ phản ánh mức độ tương
 thích. MF được huấn luyện theo mục tiêu xếp hạng cặp BPR~\cite{bpr2009}, sau đó được đông
 cứng.
@@ -111,7 +111,7 @@ Mục~\ref{sec:ablation}.
 Cầu nối được xây dựng dựa trên kiến trúc Q-Former của BLIP-2~\cite{blip2_2023}. SigLLM
 sử dụng $Q = 8$ véc-tơ truy vấn học được $\mathbf{Q} \in \mathbb{R}^{Q \times
 d_{\text{model}}}$, với $d_{\text{model}} = 768$ và nhánh văn bản khởi tạo từ
-\texttt{bert-base-uncased} (dùng cho các mục tiêu căn chỉnh vật phẩm--văn bản ở
+\texttt{bert-base-uncased} (dùng cho các mục tiêu căn chỉnh sản phẩm--văn bản ở
 Giai đoạn 1, Mục~\ref{ssec:stage1}).
 
 Trong mỗi lớp Q-Former, các truy vấn đi qua hai loại attention:
@@ -130,7 +130,7 @@ d_{\text{model}}}$, trong đó $B$ là kích thước lô và $Q = 8$.
 \textbf{Quan sát quan trọng về vai trò của cross-attention.} Trong BLIP-2 cho thị giác,
 đầu vào của cross-attention là một chuỗi dài các mảng ảnh (patch features) và
 cross-attention đóng vai trò nén chính: nén hàng trăm patch thành một số ít truy vấn.
-Trong SigLLM, đầu vào của cross-attention chỉ gồm một vài véc-tơ CF (người dùng, vật phẩm
+Trong SigLLM, đầu vào của cross-attention chỉ gồm một vài véc-tơ CF (người dùng, sản phẩm
 mục tiêu, lịch sử), nên cross-attention chủ yếu thực hiện tổng hợp có trọng số; lợi thế
 của cầu nối do đó chủ yếu đến từ \textit{tập truy vấn học được và self-attention điều phối
 giữa chúng}, chứ không phải khả năng nén. Nhận định này nhất quán với quan sát thực nghiệm
@@ -144,7 +144,7 @@ Khối truy vấn $\mathbf{Z}$ được chiếu từ không gian Q-Former sang k
 qua lớp chiếu tuyến tính $W_{\text{proj}} \in \mathbb{R}^{d_{\text{model}} \times
 d_{\text{LLM}}}$, tạo thành $Q$ soft token. Các soft token này được chèn vào chỉ dẫn tại
 vị trí của token chuyên dụng \verb|<rec_soft_token>|; phần văn bản của chỉ dẫn đánh dấu
-danh sách vật phẩm lịch sử và vật phẩm mục tiêu bằng \verb|<ItemIDList>| và
+danh sách sản phẩm lịch sử và sản phẩm mục tiêu bằng \verb|<ItemIDList>| và
 \verb|<TargetItemID>| tương ứng. Một token chuyên dụng có định danh riêng (tách khỏi từ
 vựng gốc) được dùng thay cho \verb|<unk>| nhằm tránh va chạm với các token ngoài-từ-vựng
 hay token đệm, và một lớp chuẩn hóa (LayerNorm) tại đầu ra lớp chiếu giữ cho độ lớn (scale)
@@ -249,17 +249,17 @@ lượng LoRA không phải nút thắt; nút thắt nằm ở chất lượng c
 đã tinh chỉnh chỉ dẫn cung cấp tiên nghiệm tuân theo chỉ dẫn sẵn có, giải phóng dung lượng
 LoRA để tập trung vào việc sử dụng tín hiệu CF.
 
-\subsection{Tách lớp chiếu người dùng và vật phẩm}
+\subsection{Tách lớp chiếu người dùng và sản phẩm}
 \label{ssec:tach-projector}
 
-Trong kiến trúc cơ sở, một lớp chiếu chung ánh xạ cả nhúng người dùng lẫn nhúng vật
+Trong kiến trúc cơ sở, một lớp chiếu chung ánh xạ cả nhúng người dùng lẫn nhúng sản
 phẩm từ không gian MF sang không gian Q-Former. Tuy nhiên, đặc trưng hình học của
-véc-tơ người dùng (user-factor) và véc-tơ vật phẩm (item-factor) trong không gian MF
-khác nhau: người dùng mã hóa sở thích tổng hợp, trong khi vật phẩm mã hóa thuộc tính
+véc-tơ người dùng (user-factor) và véc-tơ sản phẩm (item-factor) trong không gian MF
+khác nhau: người dùng mã hóa sở thích tổng hợp, trong khi sản phẩm mã hóa thuộc tính
 nội dung. Dùng chung một phép chiếu cho cả hai loại có thể gây xung đột hình học.
 
 Lựa chọn thiết kế này tách thành hai lớp chiếu riêng: một cho nhúng người dùng $e_u$
-và một cho các nhúng vật phẩm $\{e_i, e_{i'}\}$. Để duy trì khả năng nạp từ checkpoint
+và một cho các nhúng sản phẩm $\{e_i, e_{i'}\}$. Để duy trì khả năng nạp từ checkpoint
 cũ (chỉ có một lớp chiếu chung), trọng số của lớp chiếu chung được khởi tạo đồng thời
 cho cả hai lớp mới.
 
@@ -275,24 +275,24 @@ với điều chỉnh cho phù hợp với kiến trúc Q-Former.
 Q-Former được huấn luyện với bốn mục tiêu tương phản và căn chỉnh:
 
 \begin{itemize}
-    \item \textit{Căn chỉnh vật phẩm--văn bản (ITC)}: tối đa hóa độ tương đồng giữa biểu
-    diễn Q-Former của một vật phẩm (từ nhúng MF) và biểu diễn văn bản của vật phẩm đó
+    \item \textit{Căn chỉnh sản phẩm--văn bản (ITC)}: tối đa hóa độ tương đồng giữa biểu
+    diễn Q-Former của một sản phẩm (từ nhúng MF) và biểu diễn văn bản của sản phẩm đó
     (tên phim, thể loại). Đây là mục tiêu căn chỉnh chính.
 
-    \item \textit{So khớp vật phẩm--văn bản (ITM)}: phân loại nhị phân cặp
-    vật phẩm--văn bản có khớp hay không.
+    \item \textit{So khớp sản phẩm--văn bản (ITM)}: phân loại nhị phân cặp
+    sản phẩm--văn bản có khớp hay không.
 
-    \item \textit{Sinh văn bản có điều kiện (ITG)}: sinh văn bản mô tả vật phẩm từ biểu
+    \item \textit{Sinh văn bản có điều kiện (ITG)}: sinh văn bản mô tả sản phẩm từ biểu
     diễn Q-Former.
 
-    \item \textit{Tương phản người dùng--vật phẩm}: kéo gần biểu diễn của các cặp tương
+    \item \textit{Tương phản người dùng--sản phẩm}: kéo gần biểu diễn của các cặp tương
     tác dương và đẩy xa các cặp âm.
 \end{itemize}
 
 \textbf{Vấn đề mất cân bằng dữ liệu và giải pháp.} Trên MovieLens-1M, số cặp người
-dùng--vật phẩm dương khoảng $888$ nghìn, trong khi số cặp vật phẩm--văn bản chỉ khoảng
+dùng--sản phẩm dương khoảng $888$ nghìn, trong khi số cặp sản phẩm--văn bản chỉ khoảng
 $3$ nghìn -- tỉ lệ khoảng $0{,}34\%$. Với lô kích thước $64$, kỳ vọng số mẫu
-vật phẩm--văn bản mỗi lô chỉ khoảng $0{,}22$, nên điều kiện ``ít nhất hai mẫu cùng loại''
+sản phẩm--văn bản mỗi lô chỉ khoảng $0{,}22$, nên điều kiện ``ít nhất hai mẫu cùng loại''
 để kích hoạt ITC/ITM/ITG hiếm khi được thỏa. Hệ quả là ba mục tiêu căn chỉnh chính gần
 như không được huấn luyện, dẫn đến Q-Former không học được căn chỉnh CF--văn bản.
 
@@ -306,11 +306,11 @@ Giải pháp gồm hai điều chỉnh được tổng hợp ở Bảng~\ref{tab
 \hline
 \textbf{Điều chỉnh} & \textbf{Tầng} & \textbf{Tác động} \\
 \hline
-Giới hạn số cặp người dùng--vật phẩm ở mức $20{.}000$ & Dữ liệu & Nâng tỉ lệ mẫu
-vật phẩm--văn bản lên $\approx 13\%$; kỳ vọng $\approx 8$ mẫu/lô $\Rightarrow$ điều kiện
+Giới hạn số cặp người dùng--sản phẩm ở mức $20{.}000$ & Dữ liệu & Nâng tỉ lệ mẫu
+sản phẩm--văn bản lên $\approx 13\%$; kỳ vọng $\approx 8$ mẫu/lô $\Rightarrow$ điều kiện
 ``ít nhất 2 mẫu'' gần như luôn thỏa \\
 \hline
-Giảm trọng số mất mát người dùng--vật phẩm từ $1{,}0$ xuống $0{,}5$ & Mất mát &
+Giảm trọng số mất mát người dùng--sản phẩm từ $1{,}0$ xuống $0{,}5$ & Mất mát &
 Điều hòa cường độ gradient giữa các mục tiêu \\
 \hline
 \end{tabular}
@@ -319,7 +319,7 @@ Giảm trọng số mất mát người dùng--vật phẩm từ $1{,}0$ xuống
 
 Điều chỉnh giới hạn số cặp yêu cầu dựng lại tệp dữ liệu (vì giới hạn được cố định khi
 dựng), trong khi trọng số mất mát được đọc lúc huấn luyện và có hiệu lực ngay. Do danh
-sách cặp người dùng--vật phẩm kế thừa thứ tự sắp theo thời gian của dữ liệu gốc, việc lấy
+sách cặp người dùng--sản phẩm kế thừa thứ tự sắp theo thời gian của dữ liệu gốc, việc lấy
 phần đầu danh sách sẽ thiên lệch về các tương tác sớm (phim và người dùng thời kỳ đầu).
 Để loại bỏ thiên lệch này, danh sách được xáo trộn ngẫu nhiên với hạt giống cố định trước
 khi cắt, biến giới hạn $20{.}000$ thành một mẫu ngẫu nhiên đồng nhất mà vẫn bảo đảm tính
@@ -329,7 +329,7 @@ tái lập.
 \label{ssec:stage2}
 
 Q-Former và lớp chiếu được huấn luyện với mục tiêu sinh ngôn ngữ: từ biểu diễn Q-Former
-của tín hiệu CF, sinh văn bản mô tả vật phẩm. Giai đoạn này dạy đầu ra của cầu nối trở
+của tín hiệu CF, sinh văn bản mô tả sản phẩm. Giai đoạn này dạy đầu ra của cầu nối trở
 thành soft token mà LLM có thể diễn giải -- tức căn chỉnh không gian Q-Former với không
 gian ngữ nghĩa của LLM đông cứng.
 
