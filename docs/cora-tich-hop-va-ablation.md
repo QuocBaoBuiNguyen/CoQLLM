@@ -104,7 +104,7 @@ python .../train_qformer_stage3_step2_cie.py --cfg-path .../config.yaml \
 # (3) lora_weight thuần — PHẢI dùng prompt chỉ-text (bỏ <CFTokens>):
 python .../train_qformer_stage3_step2_cie.py --cfg-path .../config.yaml \
     --options model.cf_injection_mode=lora_weight \
-             run.qformer_stage3_step2.prompt_path=/content/SigLLM/prompts/qformer_prompt_movie_text_only.txt
+             run.qformer_stage3_step2.prompt_path=/content/CoQLLM/prompts/qformer_prompt_movie_text_only.txt
 ```
 
 So sánh val/test **AUC + uAUC** của 3 chế độ (× `cora_alpha ∈ {2, 4, 8}`).

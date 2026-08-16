@@ -10,7 +10,7 @@ This script builds the model exactly as the chosen step does, overlays the
 trained Step-2 checkpoint (strict=False), flips on eval-only mode, and runs the
 runner so it evaluates every split in `run.test_splits`.
 
-Usage (from /content/SigLLM, with PYTHONPATH=src):
+Usage (from /content/CoQLLM, with PYTHONPATH=src):
   # Step 2 (full soft-token / both model):
   python -m coqllm.pipelines.multimodal.eval_test --cfg-path configs/config.yaml \
       --step 2 \

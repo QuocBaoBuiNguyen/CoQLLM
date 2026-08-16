@@ -20,8 +20,8 @@
 model:
   arch: mini_gpt4rec_v2
   model_type: pretrain_vicuna  # legacy key — `_init_llm_model` uses AutoModel, any HF causal LM works.
-  llm_model: "/content/SigLLM/ckpt/llm/vicuna-7b-v1.5"
-  prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie.txt"
+  llm_model: "/content/CoQLLM/ckpt/llm/vicuna-7b-v1.5"
+  prompt_path: "/content/CoQLLM/prompts/qformer_prompt_movie.txt"
   # Vicuna-7B-v1.5 IS instruction-tuned (this run reproduces CoLLM's backbone).
   # Restore the standard Vicuna USER/ASSISTANT chat wrapping so the model emits
   # the "Yes"/"No" label as an assistant turn. NOTE: CoLLM's paper used
@@ -116,7 +116,7 @@ model:
     user_num: 839
     item_num: 3256
     embedding_size: 256
-    pretrained_path: "/content/SigLLM/ckpt/mf/mf_model.pth"
+    pretrained_path: "/content/CoQLLM/ckpt/mf/mf_model.pth"
 
   # Warm-init checkpoint. Step 2 overrides this with the Step 1 LoRA ckpt;
   # Step 1 overrides it to null. Leave null at top level so a bare config
@@ -125,10 +125,10 @@ model:
 
 datasets:
   movie_ood:
-    path: "/content/SigLLM/data/processed/ml-1m/"
+    path: "/content/CoQLLM/data/processed/ml-1m/"
     data_type: default
     build_info:
-      storage: "/content/SigLLM/data/processed/ml-1m/"
+      storage: "/content/CoQLLM/data/processed/ml-1m/"
       # CoLLM parity: CoLLM keeps ALL rows and zero-pads short histories (it does
       # NOT drop <2-history rows the way SeLLa does). Set False here so our test
       # population matches CoLLM's Table numbers. Flip to True to reproduce
@@ -194,7 +194,7 @@ run:
     epoch: 100
     pretrained_rec_path: ${model.rec_config.pretrained_path}
     freeze_rec: True
-    output_dir: "/content/SigLLM/ckpt/qformer_stage1/"
+    output_dir: "/content/CoQLLM/ckpt/qformer_stage1/"
 
   qformer_stage2:
     # BLIP-2-style generative pretraining: train Q-Former + linear projection
@@ -217,7 +217,7 @@ run:
     qformer_ckpt_in: "${run.qformer_stage1.output_dir}${run.qformer_stage1.best_qformer_weights_name}"
     qformer_ckpt_out: "qformer_stage2_best_qformer.pth"
     proj_ckpt_out: "qformer_stage2_best_proj.pth"
-    output_dir: "/content/SigLLM/ckpt/qformer_stage2_vicuna/"
+    output_dir: "/content/CoQLLM/ckpt/qformer_stage2_vicuna/"
     # Winning Vicuna Stage-2 recipe (baked in from the --options sweep):
     #   lr 1e-4 -> 2e-4 + wd 1e-3 -> 1e-4 converged MUCH faster and lower
     #   (val_loss 0.6016@ep20 old -> 0.5426@ep39), no instability. Still dropping
@@ -238,8 +238,8 @@ run:
     # they will be unfrozen in Step 2. Only Step 1-specific overrides live
     # here — everything else (optimizer schedule, warmup, batch sizes) is
     # inherited from the top-level `run.*` defaults.
-    prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie_text_only.txt"
-    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step1_lora_vicuna/"
+    prompt_path: "/content/CoQLLM/prompts/qformer_prompt_movie_text_only.txt"
+    output_dir: "/content/CoQLLM/ckpt/qformer_stage3_step1_lora_vicuna/"
     best_ckpt_name: "checkpoint_best.pth"
     init_lr: 2e-4
     max_epoch: 5
@@ -249,7 +249,7 @@ run:
     # loaded frozen from the Step 1 best checkpoint. Symmetric in shape to
     # `qformer_stage3_step1`: only the keys that differ from the top-level
     # defaults are listed here.
-    prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie.txt"
+    prompt_path: "/content/CoQLLM/prompts/qformer_prompt_movie.txt"
     # Ablation arm. Every arm shares R0 (MF), R1 (Stage-1), R2 (Stage-2) and the
     # Step-1 LoRA above; they differ only in what Step 2 trains, so the arm name
     # is carried in the output dir to keep their checkpoints apart:
@@ -266,7 +266,7 @@ run:
     #                   "Q-Former vs MLP" from "8 tokens vs 1" — the cross-paper
     #                   CoLLM comparison cannot separate those two.
     arm: "B3-qformer-ucq"
-    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_${run.qformer_stage3_step2.arm}_vicuna/"
+    output_dir: "/content/CoQLLM/ckpt/qformer_stage3_step2_${run.qformer_stage3_step2.arm}_vicuna/"
     ckpt: "${run.qformer_stage3_step1.output_dir}${run.qformer_stage3_step1.best_ckpt_name}"
     init_lr: 3e-5
     # Must stay below init_lr: the top-level min_lr (8e-5) is ABOVE this stage's

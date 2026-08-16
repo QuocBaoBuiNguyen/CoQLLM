@@ -59,8 +59,8 @@ def deal_with_each_u(x, u):
 
 
 def build_ml1m(
-    raw_dir: str = "/content/SigLLM/data/raw/ml-1m",
-    out_dir: str = "/content/SigLLM/data/processed/ml-1m",
+    raw_dir: str = "/content/CoQLLM/data/raw/ml-1m",
+    out_dir: str = "/content/CoQLLM/data/processed/ml-1m",
     train_slot: list = None,
     valid_slot: list = None,
     test_slot: list = None,

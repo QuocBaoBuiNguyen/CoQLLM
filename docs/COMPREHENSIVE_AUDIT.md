@@ -14,7 +14,7 @@
 | Git branches | 24 branches (15 feat/*, 1 experiment/*, 1 fix/*) | Verified |
 | Notebooks | `notebooks/` (10 files) | 7 dated post-2026-05-19, each ~1-3 MB → có outputs |
 | Local checkpoints | `checkpoints/13_5_2026/` (MF + Stage 1 + Stage 2) | Local copy only |
-| Colab checkpoints | `/content/SigLLM/ckpt/...` | Live trên Colab, không có ở repo |
+| Colab checkpoints | `/content/CoQLLM/ckpt/...` | Live trên Colab, không có ở repo |
 | Ablation doc | `docs/ABLATION_RESULTS.md` (728 lines) | Main result source |
 | Improvement doc | `docs/QFORMER_IMPROVEMENT_DIRECTIONS.md` (478 lines) | Proposals, mostly NOT YET RUN |
 | Init doc | `docs/QFORMER_INIT_IMPROVEMENTS.md` (321 lines) | Proposals only |
@@ -170,7 +170,7 @@ Trả lời cho từng experiment đã tested:
 | Eval script | ✓ **SAME** — `RecBaseTask.evaluate` (`rec_base_task.py:152`) | All Stage 3 runs |
 | Best checkpoint metric | ✓ **SAME** — `agg_metrics = AUC` (`rec_base_task.py:197`) — NOTE: NOT uAUC | `'agg_metrics': metrics.get('auc', -metric_logger.meters['loss'].global_avg)` |
 | LLM base | ✓ **SAME** — Qwen2-7B-Base | `config.yaml:4` |
-| MF checkpoint | ✓ **SAME** — `/content/SigLLM/ckpt/mf/mf_model.pth` | All branches inherit `feat/best-0.72-warm` baseline |
+| MF checkpoint | ✓ **SAME** — `/content/CoQLLM/ckpt/mf/mf_model.pth` | All branches inherit `feat/best-0.72-warm` baseline |
 | Warm/cold split | ✓ **SAME** — `test_warm_cold_ood2.pkl` | All branches |
 | Stage 1/2 ckpts | ✓ **SAME** — reused across all Stage 3 experiments | All branches |
 

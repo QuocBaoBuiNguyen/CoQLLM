@@ -67,7 +67,7 @@ def smoke_test_model(model_dir, prompt="Q: What is the largest animal?\nA:", max
 if __name__ == "__main__":
     # Default = Vicuna-7B-v1.5 to match the active CoLLM-comparison config
     # (model.llm_model: .../ckpt/llm/vicuna-7b-v1.5). Run from the repo root so
-    # ./ckpt resolves to /content/SigLLM/ckpt. To pull the Qwen base instead:
+    # ./ckpt resolves to /content/CoQLLM/ckpt. To pull the Qwen base instead:
     #   python pull_llm_model.py --model-path Qwen/Qwen2-7B --save-dir ./ckpt/llm/qwen2-7b-base
     parser = argparse.ArgumentParser(description="Download an HF causal LM + tokenizer in fp16.")
     parser.add_argument("--model-path", default="lmsys/vicuna-7b-v1.5", help="HF repo id to pull.")
