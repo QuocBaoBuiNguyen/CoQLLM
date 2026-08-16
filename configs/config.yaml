@@ -1,3 +1,22 @@
+# ============================================================================
+# PROTOCOL OF RECORD — CoLLM parity (ML-1M). Do not change these while an
+# ablation series is in flight; every arm must be comparable to every other.
+#
+#   datasets.movie_ood.build_info.match_sella_history_filter : false
+#       Keep ALL rows and zero-pad short histories, as CoLLM does. True would
+#       drop <2-history rows (SeLLa's easier population) and inflate results.
+#   run.test_splits : ["test", "test_warm", "test_cold"]
+#   run.seed        : 42   (Stage-1/Stage-2 pin their own 2025)
+#   Metrics         : AUC (global) + uAUC (per-user).
+#   Model selection : uAUC, on the valid split (rec_base_task.py `agg_metrics`).
+#       NOTE this differs from CoRA's fair re-run of CoLLM/BinLLM, which selects
+#       on AUC. AUC and uAUC diverge here (AUC keeps climbing while uAUC
+#       plateaus), so the choice is not cosmetic — report it in the thesis.
+#
+# Ablation arms are declared at run.qformer_stage3_step2.arm — see the comment
+# there. The arm name is carried into the Step-2 output_dir so arms cannot
+# silently overwrite one another.
+# ============================================================================
 model:
   arch: mini_gpt4rec_v2
   model_type: pretrain_vicuna  # legacy key — `_init_llm_model` uses AutoModel, any HF causal LM works.
@@ -85,8 +104,12 @@ model:
     # AUC lever: the additive user query-shift VARIES across users (buffs global
     # AUC) but is CONSTANT within a user (cancels in uAUC — uAUC-neutral by
     # construction). This is what pushed the Qwen "user-conditioned queries" run
-    # to AUC ~0.75 while vanilla (False) sat at ~0.73 but max uAUC. Stage-2 does
-    # NOT read user_cf, so only Step-2 needs retraining to adopt this.
+    # to AUC ~0.75 while shared queries (False) sat at ~0.73 but max uAUC.
+    # Stage-2 does NOT read user_cf, so only Step-2 needs retraining to adopt it.
+    #
+    # This flag IS the B2/B3 ablation axis: False -> arm B2, True -> arm B3.
+    # Set it together with `run.qformer_stage3_step2.arm` so the checkpoints of
+    # the two arms do not overwrite each other.
     user_conditioned: True
 
   rec_config:
@@ -227,7 +250,23 @@ run:
     # `qformer_stage3_step1`: only the keys that differ from the top-level
     # defaults are listed here.
     prompt_path: "/content/SigLLM/prompts/qformer_prompt_movie.txt"
-    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_ucq_vicuna/"
+    # Ablation arm. Every arm shares R0 (MF), R1 (Stage-1), R2 (Stage-2) and the
+    # Step-1 LoRA above; they differ only in what Step 2 trains, so the arm name
+    # is carried in the output dir to keep their checkpoints apart:
+    #
+    #   B0-textonly     no CF injected at all — evaluate the Step-1 LoRA ckpt
+    #                   directly (text-only prompt); no Step-2 run needed.
+    #   B2-qformer      Q-Former bridge, shared queries
+    #                   -> model.qformer_config.user_conditioned: False
+    #   B3-qformer-ucq  B2 + user-conditioned queries  <- headline
+    #                   -> model.qformer_config.user_conditioned: True
+    #   MLP-bridge      MLP bridge at the same 8-token budget (deferred; needs
+    #                   its own Stage-2 because llm_proj is trained on the
+    #                   bridge output). This is the arm that isolates
+    #                   "Q-Former vs MLP" from "8 tokens vs 1" — the cross-paper
+    #                   CoLLM comparison cannot separate those two.
+    arm: "B3-qformer-ucq"
+    output_dir: "/content/SigLLM/ckpt/qformer_stage3_step2_${run.qformer_stage3_step2.arm}_vicuna/"
     ckpt: "${run.qformer_stage3_step1.output_dir}${run.qformer_stage3_step1.best_ckpt_name}"
     init_lr: 3e-5
     # Must stay below init_lr: the top-level min_lr (8e-5) is ABOVE this stage's
