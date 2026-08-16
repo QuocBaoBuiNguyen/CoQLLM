@@ -1,0 +1,71 @@
+% Draft build — 5 chương nội dung CoQLLM (không front-matter).
+% Tái sử dụng preamble HCMUS từ main.tex. Sinh bởi pipeline để review nội dung.
+\documentclass[oneside,a4paper,14pt]{extreport}
+
+% Font tiếng Việt
+\usepackage[T5]{fontenc}
+\usepackage[utf8]{inputenc}
+\DeclareTextSymbolDefault{\DH}{T1}
+
+% Tài liệu tham khảo (trỏ tới bib đã sửa ở 03-refs)
+\usepackage[style=ieee]{biblatex}
+\usepackage[unicode]{hyperref}
+\addbibresource{../../03-refs/references.bib}
+\makeatletter
+\def\blx@maxline{77}
+\makeatother
+
+% Hình
+\usepackage{graphicx}
+\graphicspath{ {Images/} }
+
+% Toán
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% Bảng
+\usepackage{multirow}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+\newcolumntype{C}[1]{>{\centering\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\let\newline\\\arraybackslash\hspace{0pt}}m{#1}}
+
+% Đổi tên mặc định
+\renewcommand{\chaptername}{Chương}
+\renewcommand{\figurename}{Hình}
+\renewcommand{\tablename}{Bảng}
+\renewcommand{\contentsname}{Mục lục}
+\renewcommand{\listfigurename}{Danh sách hình}
+\renewcommand{\listtablename}{Danh sách bảng}
+
+% Kích thước Chapter
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\LARGE\bfseries}
+  {\chaptertitlename\ \thechapter}{18pt}{\huge}
+
+% Dãn dòng 1.5
+\usepackage{setspace}
+\onehalfspacing
+
+% Thụt đầu dòng + canh lề
+\usepackage{indentfirst}
+\usepackage[top=30mm,bottom=25mm,left=30mm,right=20mm,includefoot]{geometry}
+
+\begin{document}
+
+\pagenumbering{arabic}
+\tableofcontents
+\clearpage
+
+\input{../../02-chapters/ch1-gioi-thieu}
+\input{../../02-chapters/ch2-cong-trinh-lien-quan}
+\input{../../02-chapters/ch3-phuong-phap}
+\input{../../02-chapters/ch4-thuc-nghiem}
+\input{../../02-chapters/ch5-ket-luan}
+
+\clearpage
+\addcontentsline{toc}{chapter}{Tài liệu tham khảo}
+\printbibliography[title={Tài liệu tham khảo}]
+
+\end{document}

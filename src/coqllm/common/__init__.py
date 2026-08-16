@@ -1,4 +1,4 @@
-"""Common utilities for CoQ-LLM."""
+"""Common utilities for CoQLLM."""
 
 from .logging_utils import NotebookLogger
 from .early_stopping import EarlyStopping

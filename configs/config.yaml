@@ -156,7 +156,7 @@ run:
   qformer_stage1:
     # BLIP-2 representation pretraining: ITC + ITM + ITG using the Q-Former's
     # own text branch (no external BERT). Item-item contrastive (w_ii) is a
-    # CoQ-LLM-specific addition for co-watch collaborative signal.
+    # CoQLLM-specific addition for co-watch collaborative signal.
     seed: 2025
     batch_size: 256
     num_workers: 4

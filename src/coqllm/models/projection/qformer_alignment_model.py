@@ -23,7 +23,7 @@ class QRecInstructAlignmentModel(nn.Module):
       embedding table).
 
     Item-item collaborative pairs (``loss_item_item_ilm``) remain available
-    as a CoQ-LLM-specific addition on top of the BLIP-2 head set.
+    as a CoQLLM-specific addition on top of the BLIP-2 head set.
     """
 
     def __init__(self, mf, qformer) -> None:
@@ -196,7 +196,7 @@ class QRecInstructAlignmentModel(nn.Module):
         return loss, token_accuracy
 
     def loss_item_item_ilm(self, left_ids: torch.Tensor, right_ids: torch.Tensor, tau: float = 0.07):
-        """CoQ-LLM-specific co-watch item-item contrastive."""
+        """CoQLLM-specific co-watch item-item contrastive."""
         left_cf = self.mf.item_encoder(left_ids)
         right_cf = self.mf.item_encoder(right_ids)
         left_q = self.qformer.encode_cf(left_cf)

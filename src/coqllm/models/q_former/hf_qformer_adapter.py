@@ -35,7 +35,7 @@ class HFQFormerAdapter(nn.Module):
     InstructBLIP pretrained weights are loaded, and the instruction-conditioned
     query path that defines InstructBLIP is never used (see ``forward``).
 
-    Forward modes used by the CoQ-LLM training stages:
+    Forward modes used by the CoQLLM training stages:
 
     - ``forward(cf_vec)`` — queries only, ``out_proj`` applied. The LLM-feeding
       path used by Stage 2 and Stage 3. No text input.

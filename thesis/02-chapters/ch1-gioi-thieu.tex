@@ -1,0 +1,179 @@
+% !TEX root = ../main.tex
+\chapter{Giới thiệu}
+\label{Chapter1}
+
+\section{Bối cảnh và động lực nghiên cứu}
+\label{sec:boi-canh}
+
+Trong thập kỷ vừa qua, hệ thống tư vấn (recommender system) đã trở thành một thành phần
+cốt lõi trong các nền tảng thương mại điện tử, phát trực tuyến và mạng xã hội. Nhiệm vụ
+cốt lõi của hệ thống tư vấn là dự đoán mức độ phù hợp giữa người dùng và sản phẩm dựa
+trên dữ liệu lịch sử tương tác, từ đó đưa ra các gợi ý cá nhân hóa có giá trị thực tiễn
+cao~\cite{zhang2019deep}.
+
+Phương pháp lọc cộng tác (collaborative filtering -- CF) là nền tảng của phần lớn các hệ
+thống tư vấn hiện đại. Trong đó, phân rã ma trận (matrix factorization -- MF)
+\cite{mf2009} học ánh xạ người dùng và sản phẩm thành các véc-tơ nhúng ẩn trong không
+gian đặc trưng thấp chiều, sao cho tích vô hướng giữa hai véc-tơ phản ánh mức độ tương
+thích. Phân rã ma trận cùng các biến thể như LightGCN~\cite{lightgcn2020} -- khai thác
+cấu trúc đồ thị tương tác -- đã đạt được hiệu quả đáng kể trên nhiều bộ dữ liệu chuẩn.
+Tuy vậy, nhóm phương pháp này tồn tại ba hạn chế cố hữu: (i)~\textit{ma trận thưa thớt}
+(data sparsity) -- hầu hết các cặp người dùng--sản phẩm chưa có tương tác, khiến không
+gian huấn luyện cực kỳ thưa; (ii)~\textit{vấn đề khởi động nguội} (cold-start) -- người
+dùng mới hoặc sản phẩm mới không có lịch sử tương tác, nên hệ thống không thể tạo biểu
+diễn nhúng có chất lượng; (iii)~\textit{thiếu hiểu biết ngữ nghĩa} -- các biểu diễn CF
+được học hoàn toàn từ tín hiệu tương tác nhị phân, không nắm được nội dung văn bản mô tả
+thuộc tính sản phẩm hay sở thích người dùng.
+
+Sự bùng nổ của các mô hình ngôn ngữ lớn (large language model -- LLM) trong những năm
+gần đây đã mở ra một hướng tiếp cận mới để khắc phục những hạn chế trên. LLM được huấn
+luyện trước trên khối lượng văn bản khổng lồ, tích lũy hiểu biết ngữ nghĩa phong phú về
+thế giới và khả năng suy luận linh hoạt. Kết hợp LLM với hệ thống tư vấn đã trở thành
+một hướng nghiên cứu sôi nổi, với hai luồng chính: (1)~\textit{LLM-enhanced}: dùng LLM
+như bộ mã hóa để làm giàu biểu diễn đặc trưng người dùng và sản phẩm; (2)~\textit{LLMs
+as Recommender Systems (LLMs-as-RS)}: đặt bài toán gợi ý trực tiếp như một tác vụ sinh
+ngôn ngữ, trong đó LLM vừa đóng vai trò hiểu ngữ cảnh vừa đưa ra gợi ý~\cite{llmrec2023}.
+Hướng tiếp cận LLMs-as-RS đặc biệt hấp dẫn vì khả năng giải quyết cold-start nhờ hiểu
+biết ngữ nghĩa sẵn có của LLM, và khả năng tận dụng tri thức thế giới để lý giải các
+gợi ý theo ngôn ngữ tự nhiên.
+
+Luận văn này theo đuổi hướng tiếp cận LLMs-as-RS.
+
+\section{Vấn đề đặt ra: khoảng cách ngữ nghĩa giữa tín hiệu cộng tác và LLM}
+\label{sec:van-de}
+
+Khi đặt bài toán gợi ý như một tác vụ sinh ngôn ngữ, một câu hỏi then chốt xuất hiện:
+làm thế nào để đưa tín hiệu hành vi lịch sử của người dùng vào LLM một cách hiệu quả?
+Cách tiếp cận trực tiếp nhất là mã hóa lịch sử tương tác thành văn bản -- ví dụ, liệt
+kê danh sách các phim người dùng đã xem -- rồi nối vào chỉ dẫn (prompt) đầu vào của LLM.
+Tuy nhiên, cách này gặp phải một giới hạn cơ bản: với người dùng có lịch sử phong phú,
+danh sách sản phẩm nhanh chóng vượt quá độ dài ngữ cảnh (context length) cho phép, làm
+mất thông tin hoặc tăng chi phí tính toán đáng kể. Đây là trở ngại thực tiễn đã được ghi
+nhận trong nhiều công trình LLMs-as-RS~\cite{collm2023}.
+
+Giải pháp tự nhiên là biểu diễn thông tin hành vi dưới dạng \textit{véc-tơ đặc trưng
+gọn (compact)}: thay vì liệt kê từng sản phẩm, ta dùng nhúng CF -- tổng hợp từ toàn bộ lịch
+sử tương tác -- để nén tín hiệu cộng tác thành một véc-tơ dày đặc. Véc-tơ này sau đó
+được đưa vào LLM như một \textit{soft token}, bổ sung tín hiệu hành vi mà không làm dài
+ngữ cảnh. Cách tiếp cận này được gọi là \textit{tích hợp CF vào LLM qua không gian véc-tơ}.
+
+CoLLM~\cite{collm2023} là công trình tiên phong theo hướng này: sử dụng một lớp chiếu
+tuyến tính (MLP một lớp) để ánh xạ véc-tơ CF từ không gian MF vào không gian nhúng của
+LLM, tạo thành các soft token được chèn vào chỉ dẫn. Mặc dù đơn giản và hiệu quả như
+một baseline, lớp chiếu tuyến tính có hạn chế cố hữu: nó không nắm được các quan hệ
+phi tuyến phức tạp giữa không gian CF và không gian ngữ nghĩa của LLM, và không có cơ
+chế \textit{trích chọn có kiểm soát} -- toàn bộ véc-tơ CF được chiếu một lần qua một
+phép biến đổi duy nhất mà không phân biệt các thành phần nào thực sự quan trọng với ngữ
+cảnh hiện tại.
+
+Khoảng cách ngữ nghĩa giữa không gian biểu diễn CF (học từ tín hiệu tương tác nhị phân)
+và không gian ngữ nghĩa của LLM (học từ ngôn ngữ tự nhiên) là một thách thức căn bản.
+Hai không gian này có nguồn gốc huấn luyện hoàn toàn khác nhau, nên một phép chiếu đơn
+giản khó có thể \textit{căn chỉnh} (alignment) hiệu quả. Điều này đặt ra
+câu hỏi: liệu có cơ chế nối cầu nào mạnh hơn lớp chiếu tuyến tính, có khả năng căn chỉnh
+tín hiệu CF vào không gian ngữ nghĩa LLM một cách có kiểm soát và linh hoạt hơn?
+
+\section{Khoảng trống nghiên cứu}
+\label{sec:khoang-trong}
+
+Kiến trúc Q-Former, được giới thiệu trong BLIP-2~\cite{blip2_2023}, là một cầu nối đa
+phương thức được thiết kế cho bài toán căn chỉnh giữa thông tin hình ảnh và không gian
+ngôn ngữ. Q-Former sử dụng
+một tập nhỏ các véc-tơ truy vấn \textit{học được} (learned query tokens) cùng cơ chế
+cross-attention để trích xuất có chọn lọc các đặc trưng từ tín hiệu đầu vào, thay vì
+chiếu toàn bộ tín hiệu qua một phép biến đổi đơn giản. Cơ chế này về nguyên tắc thích
+hợp hơn cho bài toán căn chỉnh không gian CF vào không gian ngữ nghĩa LLM, vì nó có
+khả năng học cách tổng hợp và chọn lọc thông tin từ tín hiệu cộng tác tùy thuộc vào
+ngữ cảnh tác vụ.
+
+Công trình ILM~\cite{ilm2024} đã thử nghiệm ý tưởng dùng Q-Former như cầu nối tích hợp
+thông tin CF vào LLM cho bài toán gợi ý. Tuy nhiên, hướng nghiên cứu này còn tồn tại
+hai khoảng trống quan trọng chưa được giải quyết:
+
+\textbf{Thứ nhất}, ILM chưa đánh giá dưới quy trình dự đoán tỉ lệ nhấp (click-through
+rate -- CTR) với các độ đo AUC và uAUC như CoLLM và các công trình cùng dòng, nên không
+thể so sánh trực tiếp hiệu quả của cầu nối Q-Former với lớp chiếu tuyến tính trên cùng
+điều kiện thực nghiệm.
+
+\textbf{Thứ hai}, cầu nối Q-Former trong ILM chưa được tăng cường bằng: (i)~điều kiện hóa
+truy vấn theo người dùng và mục tiêu bảo toàn thứ tự trong từng người dùng để cải thiện AUC/uAUC;
+(ii)~biểu diễn đa token cho tín hiệu CF; (iii)~các lựa chọn thiết kế như tách lớp chiếu
+người dùng và sản phẩm.
+
+Luận văn này lấp hai khoảng trống nêu trên:
+
+\begin{quote}
+\textit{Mặc dù Q-Former đã được dùng để nối thông tin cộng tác với LLM (ILM), hướng này
+vẫn chưa được đánh giá dưới quy trình CTR với AUC và uAUC như dòng CoLLM, và chưa được
+khảo sát khi tăng cường bằng các đòn bẩy huấn luyện chuyên biệt và biểu diễn đa token.
+Luận văn này lấp khoảng trống đó: xây dựng và tăng cường một cầu nối Q-Former để tích
+hợp thông tin cộng tác vào LLM, đánh giá có hệ thống dưới quy trình AUC/uAUC và đối
+chiếu trực tiếp với baseline CoLLM.}
+\end{quote}
+
+\section{Mục tiêu và đóng góp}
+\label{sec:dong-gop}
+
+Luận văn hướng đến hai mục tiêu chính:
+
+\textbf{Mục tiêu 1:} Thiết kế và hiện thực một mô hình tích hợp tín hiệu CF vào LLM
+thông qua cầu nối Q-Former, thay thế lớp chiếu tuyến tính của CoLLM. Cụ thể, luận văn
+xây dựng kiến trúc CoQLLM gồm ba khối nối tiếp -- phân rã ma trận đông cứng, cầu nối
+Q-Former, và LLM đông cứng (Vicuna-7B-v1.5) với LoRA -- trong đó cầu nối Q-Former đóng vai
+trò căn chỉnh tín hiệu CF vào không gian ngữ nghĩa của LLM. Trên nền cầu nối soft token,
+luận văn bổ sung hai đòn bẩy huấn luyện: điều kiện hóa truy vấn theo người dùng
+(\texttt{user\_conditioned}, nhằm cải thiện AUC) và mục tiêu bảo toàn thứ tự
+trong từng người dùng (\texttt{align\_rank\_loss}, nhằm cải thiện uAUC). Song song, luận văn khảo
+sát các lựa chọn thiết kế bổ sung (biểu diễn đa token, backbone đã tinh chỉnh chỉ dẫn, tách
+lớp chiếu người dùng và sản phẩm).
+
+\textbf{Mục tiêu 2:} Đánh giá có hệ thống cầu nối Q-Former dưới quy trình CTR với hai
+độ đo AUC và uAUC trên hai tập dữ liệu MovieLens-1M và Amazon-Book -- điều mà ILM chưa thực
+hiện -- đối chiếu trực tiếp với baseline CoLLM, BinLLM và CoRA.
+
+Từ hai mục tiêu trên, luận văn đóng góp:
+
+\begin{enumerate}
+    \item \textbf{Cầu nối Q-Former được thích nghi và tăng cường cho bài toán gợi ý:}
+    Luận văn thích nghi kiến trúc Q-Former từ miền ảnh-ngôn ngữ sang miền gợi ý,
+    trong đó tín hiệu CF thay thế đặc trưng ảnh như đầu vào của cross-attention, và đưa
+    vào LLM qua đường soft token. Trên nền đó, luận văn bổ sung hai đòn bẩy huấn luyện --
+    điều kiện hóa truy vấn theo người dùng và mục tiêu bảo toàn thứ tự trong từng người dùng --
+    cải thiện lần lượt AUC và uAUC, cùng các lựa chọn thiết kế bổ sung (biểu diễn đa token,
+    backbone đã tinh chỉnh chỉ dẫn, tách projector).
+
+    \item \textbf{Đánh giá có hệ thống dưới quy trình AUC/uAUC:} Luận văn đánh giá
+    cầu nối Q-Former dưới quy trình CTR với AUC và uAUC -- cùng quy trình với CoLLM,
+    cho phép so sánh trực tiếp -- trên hai tập dữ liệu MovieLens-1M và Amazon-Book. Đây là
+    đánh giá mà các công trình Q-Former trước (ILM) chưa thực hiện, đồng thời cung cấp phân
+    tích ablation về đóng góp của từng đòn bẩy và phân rã warm/cold làm rõ trần uAUC.
+\end{enumerate}
+
+\textit{Về quan điểm trình bày kết quả:} Luận văn tuân thủ nguyên tắc thực nghiệm trung
+thực: báo cáo số liệu thực tế, phân tích nguyên nhân khi kết quả không như kỳ vọng, và
+không phóng đại kết luận vượt quá bằng chứng. Các kết quả chính được trình bày kèm đầy đủ
+lưu ý về giới hạn thực nghiệm (một seed, một số ablation thành phần còn để ngỏ).
+
+\section{Bố cục luận văn}
+\label{sec:bo-cuc}
+
+Phần còn lại của luận văn được tổ chức như sau.
+
+\textbf{Chương~\ref{Chapter2} --- Các công trình liên quan} phân tích theo bốn nhánh:
+lọc cộng tác truyền thống và hạn chế của nó; LLM trong hệ thống tư vấn và thách thức
+về độ dài ngữ cảnh; các phương pháp tích hợp CF vào LLM qua không gian véc-tơ (MLP,
+tương phản, sinh trọng số, Q-Former); và nền tảng kiến trúc Q-Former từ BLIP-2. Chương
+này kết luận rằng cầu nối Q-Former đáng được nghiên cứu và tăng cường sâu hơn.
+
+\textbf{Chương~\ref{Chapter3} --- Phương pháp đề xuất} trình bày kiến trúc CoQLLM với
+ba khối nối tiếp và lý do chọn Q-Former thay lớp chiếu tuyến tính của CoLLM. Chương này
+mô tả cơ chế Q-Former được thích nghi, hai đòn bẩy huấn luyện (điều kiện hóa truy vấn
+theo người dùng, mục tiêu bảo toàn thứ tự), các lựa chọn thiết kế, và quy trình huấn
+luyện ba giai đoạn.
+
+\textbf{Chương~\ref{Chapter4} --- Thực nghiệm và Kết quả} trình bày thiết lập thực
+nghiệm trên hai tập dữ liệu MovieLens-1M và Amazon-Book, kết quả so sánh với CoLLM, BinLLM
+và CoRA, phân tích ablation hai đòn bẩy huấn luyện, phân rã warm/cold, và thảo luận hạn chế.
+
+\textbf{Chương~\ref{Chapter5} --- Kết luận và Hướng phát triển} tóm tắt đóng góp, chỉ
+ra các hạn chế còn tồn tại và đề xuất hướng nghiên cứu tiếp theo.

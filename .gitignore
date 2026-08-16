@@ -70,5 +70,28 @@ htmlcov/
 /docs/ROADMAP.md
 /copilot-instructions.md
 /.github/COPILOT_INSTRUCTIONS.md
-
 .venv-qftest/
+
+/improvement/
+
+# LaTeX build artifacts (regenerable)
+*.aux
+*.toc
+*.lof
+*.lot
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+
+# Office temp lock files
+~$*
+
+# Thesis compiled outputs (regenerable; sources tracked)
+thesis/00-format/Thesis_Template/builds/latest.pdf
+thesis/00-format/Thesis_Template/main.pdf
+thesis/00-format/Thesis_Template/main_draft.pdf
