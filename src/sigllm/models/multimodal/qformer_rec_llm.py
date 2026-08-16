@@ -51,8 +51,8 @@ def tensor_stat_string(name: str, tensor: Optional[torch.Tensor]) -> str:
 @registry.register_model("mini_gpt4rec_v2")
 class QRecLLM(Rec2Base):
     """
-    QFormer + InstructBLIP for recommendation.
-    """ 
+    BLIP-2 Q-Former bridge + frozen LLM for recommendation.
+    """
     PRETRAINED_MODEL_CONFIG_DICT = {
         "pretrain_vicuna": "configs/models/minigpt4rec.yaml",
     }    
@@ -60,26 +60,6 @@ class QRecLLM(Rec2Base):
     # TEMP_DISABLED_USER_CF: old prompt order included a user soft-token slot.
     # PLACEHOLDERS_FOR_EMBED = ["<UserID>", "<ItemIDList>", "<TargetItemID>"]
     PLACEHOLDERS_FOR_EMBED = ["<ItemIDList>", "<TargetItemID>"]
-
-    # Item-text instructions for the Q-Former. Must match the distribution
-    # the Q-Former was trained on in stage 1 (see
-    # QFormerAlignmentBuilder.TEMPL_ITEM_TEXT). The verbose stage 2 prompt
-    # MUST NOT be passed here — it gets truncated to max_instruction_length
-    # tokens and would carry no per-item signal.
-    QFORMER_ITEM_INSTRUCTIONS = [
-        "Represent this movie for recommendation using its title and genres.",
-        "Align this movie metadata with its collaborative filtering representation.",
-        "Given the movie metadata, extract recommendation-relevant item features.",
-        "Use the title and genres to describe this movie in the item embedding space.",
-        "Map this movie's textual attributes to its collaborative recommendation signal.",
-        "Identify the movie preferences implied by its title and genre metadata.",
-        "Create a language-aligned representation of this movie for recommendation.",
-        "Summarize this movie as an item a recommender system can compare.",
-        "Based on the title and genres, represent what kind of users may like this movie.",
-        "Encode the semantic information of this movie for item-language alignment.",
-        "Use a few metadata cues to align this movie with behavioral item signals.",
-        "Produce a recommendation-aware representation from this movie description.",
-    ]
 
     def __init__(
         self,
@@ -612,7 +592,7 @@ class QRecLLM(Rec2Base):
         positions.sort(key=lambda x: x[0])
         return [ph for _, ph in positions]
 
-    def encode_rec_features_to_llm_v2(self, batch_data, feature_order=None, instruction_list=None):
+    def encode_rec_features_to_llm_v2(self, batch_data, feature_order=None):
         """
         Encodes recommendation features (History, Target) into LLM embedding space.
         
@@ -1050,20 +1030,8 @@ class QRecLLM(Rec2Base):
 
         return label_embeds, label_tokens, ans_map
 
-    def _build_qformer_instructions(self, batch_size: int) -> list:
-        """Build short item-text instructions for the Q-Former.
-
-        Matches the distribution the Q-Former was trained on in stage 1: a
-        fresh sample per row during training, a deterministic fixed string
-        during eval/inference so the same input maps to the same embedding.
-        """
-        if self.training:
-            return random.choices(self.QFORMER_ITEM_INSTRUCTIONS, k=batch_size)
-        return [self.QFORMER_ITEM_INSTRUCTIONS[0]] * batch_size
-
     def build_llm_inputs_from_prompt_v2(self, prompt_template, batch_data):
         feature_order = self.get_placeholder_order(prompt_template) if prompt_template else None
-        batch_size = batch_data["UserID"].shape[0]
 
         if not feature_order:
             self._log_trainable_module_stats()
@@ -1075,11 +1043,9 @@ class QRecLLM(Rec2Base):
             }
             rec_atts = None
         else:
-            instruction_list = self._build_qformer_instructions(batch_size)
             rec_embeds, rec_atts = self.encode_rec_features_to_llm_v2(
                 batch_data,
                 feature_order=feature_order,
-                instruction_list=instruction_list,
             )
 
         llm_embeds, llm_atts = self.wrap_prompt_with_soft_tokens_v2(rec_embeds, rec_atts, batch_data, prompt_template)
