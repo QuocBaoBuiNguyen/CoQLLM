@@ -25,11 +25,11 @@ class HFQFormerAdapter(nn.Module):
     """BLIP-2 Q-Former over a collaborative-filtering vector.
 
     Implemented on ``transformers.InstructBlipQFormerModel``. That is an
-    implementation choice, not an architectural one: before transformers 4.45,
-    ``Blip2QFormerModel`` is incomplete — its layers call ``self.intermediate``
-    / ``self.output`` (the text-side FFN) without ever constructing them, and
-    it has no text embedding table, so it cannot run BLIP-2's own stage-1
-    objectives. 4.45 fixed this upstream; we do not run that version.
+    implementation choice, not an architectural one: on the ``transformers
+    ==4.38.2`` we run, ``Blip2QFormerModel`` is incomplete — its layers call
+    ``self.intermediate`` / ``self.output`` (the text-side FFN) without ever
+    constructing them, and it has no text embedding table, so it cannot run
+    BLIP-2's own stage-1 objectives. Fixed upstream only in 4.45.
     ``InstructBlipQFormerModel`` is structurally the full BLIP-2 Q-Former: a
     query stream and a text stream sharing one self-attention block. No
     InstructBLIP pretrained weights are loaded, and the instruction-conditioned
