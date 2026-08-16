@@ -256,10 +256,14 @@ class HFQFormerAdapter(nn.Module):
     ) -> torch.Tensor:
         """Expand base learnable queries and optionally shift per-user.
 
-        When ``user_conditioned`` is on and ``user_cf`` is provided, each query
-        token is shifted by ``user_proj(user_cf)`` so the same Q tokens encode
-        different aspects for different users. Otherwise queries are identical
-        across the batch (vanilla Q-Former behaviour).
+        Two modes, and they are the B2/B3 ablation axis:
+
+        - ``user_conditioned=False`` — *shared queries*, plain BLIP-2: the one
+          learned ``self.q`` table is broadcast unchanged to every row, so
+          every user and every item is read by the identical Q vectors.
+        - ``user_conditioned=True`` — each query token is shifted by
+          ``user_proj(user_cf)``, so the same Q tokens extract different
+          aspects of an item for different users.
         """
         query_tokens = self.q.expand(batch_size, -1, -1)
         if self.user_conditioned and user_cf is not None:

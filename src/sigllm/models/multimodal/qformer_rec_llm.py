@@ -631,7 +631,7 @@ class QRecLLM(Rec2Base):
 
             # User-conditioned queries: user_cf shifts the base Q tokens so the
             # same queries extract per-user-relevant aspects of each item. Pulled
-            # ONLY when the flag is on so the vanilla path stays untouched.
+            # ONLY when the flag is on, so the shared-query path stays untouched.
             user_cf_for_q = None
             if self.user_conditioned:
                 user_cf_for_q = self.rec_encoder.user_encoder(batch_data["UserID"])  # [B,d_cf]
