@@ -22,25 +22,33 @@ LOGGER = logging.getLogger(__name__)
 
 
 class HFQFormerAdapter(nn.Module):
-    """Wrapper around Hugging Face InstructBLIP Q-Former.
+    """BLIP-2 Q-Former over a collaborative-filtering vector.
 
-    Exposes multiple forward modes used by the SigLLM training stages:
+    Implemented on ``transformers.InstructBlipQFormerModel``. That is an
+    implementation choice, not an architectural one: on the pinned
+    ``transformers==4.38.2``, ``Blip2QFormerModel`` is incomplete — its layers
+    call ``self.intermediate`` / ``self.output`` (the text-side FFN) without
+    ever constructing them, so it cannot run BLIP-2's own stage-1 objectives.
+    ``InstructBlipQFormerModel`` is structurally the full BLIP-2 Q-Former: a
+    query stream and a text stream sharing one self-attention block. No
+    InstructBLIP pretrained weights are loaded, and the instruction-conditioned
+    query path that defines InstructBLIP is never used (see ``forward``).
 
-    - ``forward(cf_vec, text)`` — joint forward returning query hidden states
-      with ``out_proj`` applied. Used by Stage 2 / Stage 3 when ``text`` is the
-      InstructBLIP-style task instruction.
-    - ``encode_cf(cf_vec)`` — queries only, no text branch input. Used by
-      Stage 1 ITC where the CF and text streams are kept uni-modal.
+    Forward modes used by the SigLLM training stages:
+
+    - ``forward(cf_vec)`` — queries only, ``out_proj`` applied. The LLM-feeding
+      path used by Stage 2 and Stage 3. No text input.
+    - ``encode_cf(cf_vec)`` — queries only, without ``out_proj``. Used by
+      Stage 1 ITC / item-item / user-item, where the streams stay uni-modal.
     - ``encode_text(text)`` — text only, no queries, no cross-attention. Used
-      by Stage 1 ITC and as a CLS pool for downstream contrastive losses.
-    - ``forward_multimodal(cf_vec, text, causal_text)`` — joint forward
-      returning both query and text hidden states. ``causal_text=True`` masks
-      text→text attention causally for ITG; ``False`` is the default
-      bidirectional mode used by ITM and by ``forward``.
+      by Stage 1 ITC as the CLS pool.
+    - ``forward_multimodal(cf_vec, text, causal_text)`` — joint forward over
+      queries and text. ``causal_text=True`` masks text→text attention
+      causally for ITG; ``False`` is the bidirectional mode used by ITM.
 
     The recommendation signal enters through ``encoder_hidden_states`` (cross-
-    attention to a single CF token); the text stream enters through
-    ``input_ids`` (self-attention with the learned queries).
+    attention to a single CF token), taking the place of image patches. Text
+    enters only in the Stage-1 objectives, and only as real item metadata.
     """
 
     def __init__(
@@ -406,14 +414,18 @@ class HFQFormerAdapter(nn.Module):
     def forward(
         self,
         cf_vec: torch.Tensor,
-        instruction,
         user_cf: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """LLM-feeding mode: queries cross-attend to ``cf_vec`` while the text
-        stream consumes ``instruction``. Returns query hidden states with
-        ``out_proj`` applied: ``[B, num_queries, output_dim]``."""
+        """LLM-feeding mode (BLIP-2): queries cross-attend to ``cf_vec`` and to
+        nothing else. Returns query hidden states with ``out_proj`` applied:
+        ``[B, num_queries, output_dim]``.
 
-        query_hidden, _, _, _ = self.forward_multimodal(
-            cf_vec, instruction, causal_text=False, user_cf=user_cf
-        )
-        return self.out_proj(query_hidden)
+        No text enters this path. Routing a task instruction through the query
+        stream here is InstructBLIP's mechanism, not BLIP-2's, and is
+        deliberately absent: the instruction we used to pass carried no
+        per-item content (a fixed template, constant across the eval set), so
+        it added computation but no information. Dropping it also makes stage 3
+        consistent with stage 2, which trains ``llm_proj`` on ``encode_cf``
+        outputs.
+        """
+        return self.out_proj(self.encode_cf(cf_vec, user_cf=user_cf))

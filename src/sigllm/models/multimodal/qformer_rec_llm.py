@@ -641,18 +641,6 @@ class QRecLLM(Rec2Base):
         Q = self.proj_token_num
         H = self.llm_model.config.hidden_size
 
-        if instruction_list is None:
-            instruction_list = batch_data.get(
-                "instruction",
-                self._build_qformer_instructions(B),
-            )
-        if isinstance(instruction_list, str):
-            ins_list = [instruction_list] * B
-        else:
-            ins_list = list(instruction_list)
-        if len(ins_list) != B:
-            raise ValueError(f"Expected {B} instructions, got {len(ins_list)}")
-
         with self.maybe_autocast():
             # Stage-2 uses the in-tree rec encoder API: direct embedding lookup from ids.
             # TEMP_DISABLED_USER_CF: old path injected a user CF token into the LLM prompt.
@@ -668,9 +656,9 @@ class QRecLLM(Rec2Base):
             if self.user_conditioned:
                 user_cf_for_q = self.rec_encoder.user_encoder(batch_data["UserID"])  # [B,d_cf]
 
-            # 2) QFormer outputs (instruction-conditioned)
-            # user_q = self.qformer(user_cf, ins_list)        # [B,Q,d_model]
-            target_q = self.qformer(target_cf, ins_list, user_cf=user_cf_for_q)  # [B,Q,d_model]
+            # 2) QFormer outputs (BLIP-2: queries cross-attend to the CF vector only)
+            # user_q = self.qformer(user_cf)                 # [B,Q,d_model]
+            target_q = self.qformer(target_cf, user_cf=user_cf_for_q)  # [B,Q,d_model]
 
             # 3) Project to LLM hidden per token
             # user_llm = self.llm_proj(user_q)               # [B,Q,H]
@@ -696,7 +684,6 @@ class QRecLLM(Rec2Base):
 
                 inter_cf = self.rec_encoder.item_encoder(ids)                              # [B,L,d_cf]
                 inter_cf_flat = inter_cf.reshape(B * L, -1)                               # [B*L,d_cf]
-                inter_ins_list = [ins for ins in ins_list for _ in range(L)]               # len B*L
 
                 # Repeat each user's CF L times so every history item in the flat
                 # batch sees its owning user's conditioning vector.
@@ -707,7 +694,7 @@ class QRecLLM(Rec2Base):
                     )
 
                 inter_q_flat = self.qformer(
-                    inter_cf_flat, inter_ins_list, user_cf=user_cf_flat_for_q,
+                    inter_cf_flat, user_cf=user_cf_flat_for_q,
                 )                                                                          # [B*L,Q,d_model]
                 inter_llm_flat2 = self.llm_proj(inter_q_flat)                         # [B*L,Q,H]
                 if self.ablate_soft_tokens:

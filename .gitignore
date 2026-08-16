@@ -70,3 +70,5 @@ htmlcov/
 /docs/ROADMAP.md
 /copilot-instructions.md
 /.github/COPILOT_INSTRUCTIONS.md
+
+.venv-qftest/
