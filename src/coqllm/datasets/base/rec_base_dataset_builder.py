@@ -51,9 +51,16 @@ class RecBaseDatasetBuilder(ABC):
                 filename="train_ood2.pkl",
             )
 
+            # Validation split is configurable purely for SPEED: per-epoch eval
+            # dominates Step-2 wall clock on Amazon-Book (valid ~25.7k rows vs
+            # ~6.4k training samples/epoch). valid_small_ood2.pkl (25%) is shipped
+            # by preprocessing and is what CoLLM validates on — reference-parity,
+            # not a shortcut. It DOES change best-checkpoint selection, so keep it
+            # fixed across runs you compare. Default keeps the full split.
+            valid_filename = build_info.get("valid_filename", "valid_ood2.pkl")
             datasets["valid"] = dataset_cls(
                 dataset_config=self.dataset_config,
-                filename="valid_ood2.pkl",
+                filename=valid_filename,
             )
             datasets["test"] = dataset_cls(
                 dataset_config=self.dataset_config,

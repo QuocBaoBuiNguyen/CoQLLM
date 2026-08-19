@@ -122,6 +122,12 @@ datasets:
       # CoLLM parity: CoLLM keeps ALL rows and zero-pads short histories (does
       # NOT drop <2-history like SeLLa). False -> test population matches CoLLM.
       match_sella_history_filter: false
+      # Speed: per-epoch validation dominates Step-2 wall clock on Amazon-Book.
+      # valid_small_ood2.pkl (25% of valid) is what CoLLM validates on -> ~1.75x
+      # faster, reference-parity. WARNING: this changes best-checkpoint selection,
+      # so keep it FIXED across any runs you compare. Comment out to use the full
+      # valid_ood2.pkl split.
+      valid_filename: valid_small_ood2.pkl
 
 run:
   task: rec_pretrain
