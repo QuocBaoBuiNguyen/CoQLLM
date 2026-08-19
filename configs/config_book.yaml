@@ -92,6 +92,14 @@ model:
     num_layers: 4
     user_conditioned: True
 
+    # D2 fix: Stage-1 was silently using the MOVIE templates — every Q-Former
+    # instruction literally said "Represent this movie..." while processing
+    # Amazon books. item_noun=book renders "book" instead. Because the Q-Former
+    # is pretrained on this wording, it only takes effect after rebuilding the
+    # Q-Former pkls and re-running Stage 1 + Stage 2 (revert to `movie` if you
+    # reuse a book Stage-1 checkpoint built before this fix).
+    item_noun: book
+
   rec_config:
     # Amazon-Book (CoLLM/BinLLM OOD split) — much sparser than ML-1M (839/3256),
     # which is the point: weak CF -> the LLM/Q-Former bridge has real headroom.

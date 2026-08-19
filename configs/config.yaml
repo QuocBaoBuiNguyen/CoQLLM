@@ -112,6 +112,12 @@ model:
     # the two arms do not overwrite each other.
     user_conditioned: True
 
+    # D2: domain noun rendered into the Q-Former Stage-1 instruction templates
+    # ("Represent this {noun}..."). ML-1M = movie. Must match what Stage 1 was
+    # built/trained with — changing it requires rebuilding the Q-Former pkls
+    # and re-running Stage 1 + Stage 2.
+    item_noun: movie
+
   rec_config:
     user_num: 839
     item_num: 3256
