@@ -289,16 +289,24 @@ def _save_checkpoint(
     optimizer,
     epoch,
     val_logs,
+    stopper=None,
 ):
-    torch.save(
-        {
-            "epoch": epoch,
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            **{f"val_{key}": value for key, value in val_logs.items()},
-        },
-        checkpoint_path,
-    )
+    payload = {
+        "epoch": epoch,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        **{f"val_{key}": value for key, value in val_logs.items()},
+    }
+    # For the resumable "latest" checkpoint: persist early-stopping state so a
+    # resumed run continues the same patience/best-metric bookkeeping.
+    if stopper is not None:
+        payload["stopper"] = {
+            "best_metric_val": stopper.best_metric_val,
+            "best_full_metric": stopper.best_full_metric,
+            "counter": stopper.counter,
+            "early_stop": stopper.early_stop,
+        }
+    torch.save(payload, checkpoint_path)
 
 def _load_checkpoint(checkpoint_path, model, optimizer=None):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
@@ -335,7 +343,36 @@ def train_qformer_stage1_representation(cfg):
     w_ui = float(cfg.get("w_ui", 0.0))
     tau_ui = float(cfg.get("tau_ui", 0.07))
 
-    for epoch in range(cfg.epoch):
+    # Resume support (opt-in via run.qformer_stage1.resume=true). A "latest"
+    # checkpoint (model + optimizer + epoch + early-stopping state) is written
+    # after every eval epoch below, so training can be stopped and continued.
+    # Only whole eval epochs are checkpointed: resume restarts from the last
+    # completed eval epoch; any partial epoch after it is simply re-run.
+    latest_checkpoint_path = os.path.join(
+        outdir, cfg.get("latest_checkpoint_name", "qformer_stage1_latest.pt")
+    )
+    start_epoch = 0
+    if bool(cfg.get("resume", False)) and os.path.exists(latest_checkpoint_path):
+        ckpt = _load_checkpoint(latest_checkpoint_path, model, opt)
+        # Adam state was saved on CPU; move it back onto the model's device.
+        for state in opt.state.values():
+            for k, v in state.items():
+                if torch.is_tensor(v):
+                    state[k] = v.to(device)
+        start_epoch = int(ckpt.get("epoch", 0))
+        st = ckpt.get("stopper")
+        if st is not None:
+            stopper.best_metric_val = st["best_metric_val"]
+            stopper.best_full_metric = st["best_full_metric"]
+            stopper.counter = st["counter"]
+            stopper.early_stop = st["early_stop"]
+        log_step(
+            "Resumed Stage-1 from latest checkpoint",
+            f"path={latest_checkpoint_path}, next_epoch={start_epoch}, "
+            f"counter={stopper.counter}, best_val_loss={stopper.best_metric_val:.4f}",
+        )
+
+    for epoch in range(start_epoch, cfg.epoch):
         model.train()
         train_totals = {
             "loss": 0.0,
@@ -437,6 +474,12 @@ def train_qformer_stage1_representation(cfg):
                     "No validation improvement",
                     f"counter={stopper.counter}, best_epoch={best_epoch}, best_val_loss={best_val_loss:.4f}",
                 )
+
+            # Resumable "latest" checkpoint (every eval epoch): full state so the
+            # run can be stopped here and continued with resume=true.
+            _save_checkpoint(
+                latest_checkpoint_path, model, opt, epoch + 1, val_logs, stopper=stopper
+            )
 
             if stopper.should_stop:
                 best_epoch = stopper.best_full_metric["epoch"] if stopper.best_full_metric is not None else "n/a"

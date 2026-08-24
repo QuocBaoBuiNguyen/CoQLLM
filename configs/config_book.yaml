@@ -216,6 +216,12 @@ run:
     early_stopping_min_delta: 1e-4
     best_checkpoint_name: "qformer_stage1_best_full.pt"
     best_qformer_weights_name: "qformer_stage1_best_qformer.pth"
+    # Resume support: a full "latest" checkpoint (model + optimizer + epoch +
+    # early-stopping state) is written after every eval epoch. Stop training any
+    # time and continue with `--options run.qformer_stage1.resume=true` (starts
+    # from the last completed eval epoch). Default false = fresh run from epoch 0.
+    latest_checkpoint_name: "qformer_stage1_latest.pt"
+    resume: false
     log_epoch: 1
     epoch: 100
     pretrained_rec_path: ${model.rec_config.pretrained_path}
